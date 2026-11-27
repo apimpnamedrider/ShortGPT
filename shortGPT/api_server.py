@@ -198,36 +198,40 @@ def render_video(topic: str, language: str, token: str) -> str:
     work_dir.mkdir(parents=True, exist_ok=True)
     output_path = None
 
-    has_ai_key = bool(
-        ApiKeyManager.get_api_key("OPENAI_API_KEY")
-        or ApiKeyManager.get_api_key("GEMINI_API_KEY")
-    )
-    has_pexels_key = bool(ApiKeyManager.get_api_key("PEXELS_API_KEY"))
-
-    if has_ai_key and has_pexels_key:
-        try:
-            selected_language = Language(language)
-            voice_module = EdgeTTSVoiceModule(
-                EDGE_TTS_VOICENAME_MAPPING[selected_language]["male"]
-            )
-            script = gpt_chat_video.generateScript(topic, selected_language.value)
-            if not script:
-                raise RuntimeError("ShortGPT could not generate a script.")
-            engine = ContentVideoEngine(
-                voiceModule=voice_module,
-                script=script,
-                isVerticalFormat=True,
-                language=selected_language,
-            )
-            for _step, _description in engine.makeContent():
-                pass
-            candidate = engine.get_video_output_path()
-            if not candidate or not os.path.isfile(candidate):
-                raise RuntimeError("ShortGPT did not produce an MP4 file.")
-            output_path = Path(candidate)
-            _validate_mp4(output_path)
-        except Exception as exc:
-            print(f"Primary ShortGPT render failed; switching to FFmpeg fallback: {exc}")
+    # Use the deterministic animated-scene renderer by default. The original
+    # ShortGPT stock-footage route can return visually static/poorly matched
+    # footage and must be explicitly enabled only after clip validation.
+    use_stock_engine = os.environ.get("SHORTGPT_USE_STOCK_VIDEO_ENGINE", "").lower() == "true"
+    if use_stock_engine:
+        has_ai_key = bool(
+            ApiKeyManager.get_api_key("OPENAI_API_KEY")
+            or ApiKeyManager.get_api_key("GEMINI_API_KEY")
+        )
+        has_pexels_key = bool(ApiKeyManager.get_api_key("PEXELS_API_KEY"))
+        if has_ai_key and has_pexels_key:
+            try:
+                selected_language = Language(language)
+                voice_module = EdgeTTSVoiceModule(
+                    EDGE_TTS_VOICENAME_MAPPING[selected_language]["male"]
+                )
+                script = gpt_chat_video.generateScript(topic, selected_language.value)
+                if not script:
+                    raise RuntimeError("ShortGPT could not generate a script.")
+                engine = ContentVideoEngine(
+                    voiceModule=voice_module,
+                    script=script,
+                    isVerticalFormat=True,
+                    language=selected_language,
+                )
+                for _step, _description in engine.makeContent():
+                    pass
+                candidate = engine.get_video_output_path()
+                if not candidate or not os.path.isfile(candidate):
+                    raise RuntimeError("ShortGPT did not produce an MP4 file.")
+                output_path = Path(candidate)
+                _validate_mp4(output_path)
+            except Exception as exc:
+                print(f"Primary ShortGPT render failed; switching to FFmpeg animated scenes: {exc}")
 
     if output_path is None:
         output_path = _fallback_render(topic, language, work_dir)
