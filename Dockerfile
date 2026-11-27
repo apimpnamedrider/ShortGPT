@@ -17,6 +17,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app
 
+# One Railway volume persists both the TinyMongo database and rendered videos.
+RUN mkdir -p /app/.database/videos \
+    && rm -rf /app/videos \
+    && ln -s /app/.database/videos /app/videos
+
 EXPOSE 31415
 
 # Do not print environment variables: they may contain API credentials.
