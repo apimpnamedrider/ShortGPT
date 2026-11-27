@@ -1,4 +1,7 @@
 import gradio as gr
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+import uvicorn
 
 from gui.content_automation_ui import GradioContentAutomationUI
 from gui.ui_abstract_base import AbstractBaseUI
@@ -6,7 +9,7 @@ from gui.ui_components_html import GradioComponentsHTML
 from gui.ui_tab_asset_library import AssetLibrary
 from gui.ui_tab_config import ConfigUI
 from shortGPT.utils.cli import CLI
-from shortGPT.api_server import render_video
+from shortGPT.api_server import render_video, start_render_job, get_render_job
 
 
 class ShortGptUI(AbstractBaseUI):
@@ -44,13 +47,36 @@ class ShortGptUI(AbstractBaseUI):
         return shortGptUI
 
     def launch(self):
-        '''Launch the server'''
+        '''Launch Gradio plus a lightweight asynchronous render-job API.'''
         shortGptUI = self.create_interface()
-        if not getattr(self, 'colab', False):
-                    print("\n\n********************* STARTING SHORGPT **********************")
-                    print("\nShortGPT is running here 👉 http://localhost:31415\n")
-                    print("********************* STARTING SHORGPT **********************\n\n")
-        shortGptUI.queue().launch(server_port=31415, height=1000, allowed_paths=["public/","videos/","fonts/","/app/.database/videos/"], share=self.colab, server_name="0.0.0.0")
+        app = FastAPI()
+
+        @app.post("/api/render-jobs")
+        async def create_render_job(request: Request):
+            payload = await request.json()
+            job_id = start_render_job(
+                str(payload.get("topic") or ""),
+                str(payload.get("language") or "English"),
+                str(payload.get("token") or ""),
+                str(payload.get("storyboard") or "")
+            )
+            return JSONResponse({"jobId": job_id, "status": "queued"})
+
+        @app.get("/api/render-jobs/{job_id}")
+        async def render_job_status(job_id: str):
+            job = get_render_job(job_id)
+            if not job:
+                raise HTTPException(status_code=404, detail="Render job not found or expired.")
+            result = {key: value for key, value in job.items() if key != "createdAt"}
+            return JSONResponse(result)
+
+        app = gr.mount_gradio_app(
+            app, shortGptUI.queue(),
+            path="/",
+            allowed_paths=["public/", "videos/", "fonts/", "/app/.database/videos/"]
+        )
+        print("\nShortGPT and Shorts Forge job API running on http://0.0.0.0:31415\n")
+        uvicorn.run(app, host="0.0.0.0", port=31415)
 
 
 
