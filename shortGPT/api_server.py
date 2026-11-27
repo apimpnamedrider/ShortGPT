@@ -2,7 +2,6 @@ import asyncio
 import hmac
 import os
 import re
-import shutil
 import subprocess
 import uuid
 from pathlib import Path
