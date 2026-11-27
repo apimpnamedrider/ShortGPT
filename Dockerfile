@@ -8,8 +8,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Railway runs this worker without a CUDA GPU: install CPU-only PyTorch wheels.
-RUN pip install --no-cache-dir torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+# Install CPU-only PyTorch wheels without resolving dependencies from the PyTorch index.
+RUN pip install --no-cache-dir --no-deps torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir filelock typing-extensions sympy networkx jinja2 fsspec
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
