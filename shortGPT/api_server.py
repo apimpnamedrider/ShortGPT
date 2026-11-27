@@ -28,12 +28,16 @@ FONT_CANDIDATES = [
 def _run(command, timeout=900):
     completed = subprocess.run(
         command,
-        check=True,
+        check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         timeout=timeout,
     )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "No FFmpeg diagnostic output").strip()
+        print(f"Render command failed (exit {completed.returncode}): {detail[-6000:]}")
+        raise RuntimeError(f"Render command failed: {detail[-1200:]}")
     return completed.stdout.strip()
 
 
@@ -122,8 +126,8 @@ def _fallback_render(topic, language, work_dir):
         "drawbox=x='(iw-260)*(0.5+0.5*sin(t*0.55))':y=250:w=260:h=5:color=0x38BDF8@0.8:t=fill",
         "drawbox=x=90:y='420+110*sin(t*0.7)':w=18:h=18:color=0x38BDF8@0.9:t=fill",
         "drawbox=x=972:y='520+130*cos(t*0.65)':w=18:h=18:color=0xA78BFA@0.9:t=fill",
-        "drawbox=x='(W/2)+300*sin(t*0.8)-14':y='960+300*cos(t*0.8)-14':w=28:h=28:color=0x38BDF8@0.95:t=fill",
-        "drawbox=x='(W/2)+300*sin(t*0.8+3.14)-14':y='960+300*cos(t*0.8+3.14)-14':w=28:h=28:color=0xA78BFA@0.95:t=fill",
+        "drawbox=x='(iw/2)+300*sin(t*0.8)-14':y='960+300*cos(t*0.8)-14':w=28:h=28:color=0x38BDF8@0.95:t=fill",
+        "drawbox=x='(iw/2)+300*sin(t*0.8+3.14)-14':y='960+300*cos(t*0.8+3.14)-14':w=28:h=28:color=0xA78BFA@0.95:t=fill",
         "drawbox=x=110:y=690:w=860:h=540:color=0x101C2F@0.92:t=fill",
         "drawbox=x=110:y=690:w=860:h=3:color=0x38BDF8@0.9:t=fill",
         f"drawtext=fontfile='{font}':text='HOW IT WORKS':fontcolor=0x38BDF8:fontsize=34:x=(w-text_w)/2:y=760",
