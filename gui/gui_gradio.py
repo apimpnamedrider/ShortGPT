@@ -31,11 +31,12 @@ class ShortGptUI(AbstractBaseUI):
             api_topic = gr.Textbox(visible=False)
             api_language = gr.Textbox(value="English", visible=False)
             api_token = gr.Textbox(visible=False)
+            api_storyboard = gr.Textbox(visible=False)
             api_result = gr.Textbox(visible=False)
             api_trigger = gr.Button(visible=False)
             api_trigger.click(
                 render_video,
-                inputs=[api_topic, api_language, api_token],
+                inputs=[api_topic, api_language, api_token, api_storyboard],
                 outputs=[api_result],
                 api_name="render_video",
                 show_progress="hidden",
