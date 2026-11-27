@@ -123,21 +123,40 @@ def _fallback_render(topic, language, work_dir):
     # All motion is generated directly by FFmpeg expressions. This avoids loading
     # full-resolution frames into Python/RAM and produces genuine 24-fps animation.
     filters = [
-        "drawbox=x='(iw-260)*(0.5+0.5*sin(t*0.55))':y=250:w=260:h=5:color=0x38BDF8@0.8:t=fill",
-        "drawbox=x=90:y='420+110*sin(t*0.7)':w=18:h=18:color=0x38BDF8@0.9:t=fill",
-        "drawbox=x=972:y='520+130*cos(t*0.65)':w=18:h=18:color=0xA78BFA@0.9:t=fill",
-        "drawbox=x='(iw/2)+300*sin(t*0.8)-14':y='960+300*cos(t*0.8)-14':w=28:h=28:color=0x38BDF8@0.95:t=fill",
-        "drawbox=x='(iw/2)+300*sin(t*0.8+3.14)-14':y='960+300*cos(t*0.8+3.14)-14':w=28:h=28:color=0xA78BFA@0.95:t=fill",
-        "drawbox=x=110:y=690:w=860:h=540:color=0x101C2F@0.92:t=fill",
-        "drawbox=x=110:y=690:w=860:h=3:color=0x38BDF8@0.9:t=fill",
-        f"drawtext=fontfile='{font}':text='HOW IT WORKS':fontcolor=0x38BDF8:fontsize=34:x=(w-text_w)/2:y=760",
-        f"drawtext=fontfile='{font}':textfile='{title_path}':fontcolor=white:fontsize=58:line_spacing=16:x='(w-text_w)/2+18*sin(t*0.8)':y='890+12*sin(t*1.1)':box=1:boxcolor=0x080D18@0.35:boxborderw=24",
-        f"drawtext=fontfile='{font}':text='FOLLOW THE PROCESS':fontcolor=0xCBD5E1:fontsize=27:x=(w-text_w)/2:y=1110",
-        "drawbox=x=120:y=1370:w='min(840, t*14)':h=9:color=0x38BDF8@0.95:t=fill",
-        f"drawtext=fontfile='{font}':text='01  INPUT':fontcolor=white:fontsize=42:x=(w-text_w)/2:y=1450:enable='between(t,0,19.99)'",
-        f"drawtext=fontfile='{font}':text='02  PROCESS':fontcolor=white:fontsize=42:x=(w-text_w)/2:y=1450:enable='between(t,20,39.99)'",
-        f"drawtext=fontfile='{font}':text='03  RESULT':fontcolor=white:fontsize=42:x=(w-text_w)/2:y=1450:enable='between(t,40,60)'",
-        f"drawtext=fontfile='{font}':text='SHORTS FORGE  •  60 SECOND EXPLAINER':fontcolor=0x94A3B8:fontsize=22:x=(w-text_w)/2:y=1770",
+        # Persistent framing and animated camera-like scan line.
+        "drawbox=x=72:y=170:w=936:h=2:color=0x334155@0.9:t=fill",
+        "drawbox=x='72+mod(t*210,936)':y=170:w=120:h=4:color=0x38BDF8@0.95:t=fill",
+        f"drawtext=fontfile='{font}':text='HOW IT WORKS':fontcolor=0x38BDF8:fontsize=30:x=82:y=95",
+        f"drawtext=fontfile='{font}':textfile='{title_path}':fontcolor=white:fontsize=48:x=82:y=220:box=1:boxcolor=0x101C2F@0.85:boxborderw=18",
+        # Scene 1 — separate input pieces travel into an assembly area.
+        "drawbox=x=90:y=650:w=900:h=560:color=0x101C2F@0.88:t=fill:enable='between(t,0,19.99)'",
+        "drawbox=x=90:y=650:w=900:h=3:color=0x38BDF8@0.9:t=fill:enable='between(t,0,19.99)'",
+        "drawbox=x='120+mod(t*115,650)':y=780:w=92:h=92:color=0x38BDF8@0.95:t=fill:enable='between(t,0,19.99)'",
+        "drawbox=x='820-mod(t*105,650)':y=980:w=92:h=92:color=0xA78BFA@0.95:t=fill:enable='between(t,0,19.99)'",
+        "drawbox=x=485:y=855:w=110:h=110:color=0xE2E8F0@0.95:t=fill:enable='between(t,0,19.99)'",
+        "drawbox=x='485+30*sin(t*2)':y=965:w=110:h=5:color=0x38BDF8@0.95:t=fill:enable='between(t,0,19.99)'",
+        f"drawtext=fontfile='{font}':text='01  INPUT  /  COMPONENTS COME TOGETHER':fontcolor=white:fontsize=27:x=130:y=1110:enable='between(t,0,19.99)'",
+        # Scene 2 — an exploded, layered mechanism with parts moving around a core.
+        "drawbox=x=90:y=650:w=900:h=560:color=0x101C2F@0.88:t=fill:enable='between(t,20,39.99)'",
+        "drawbox=x=90:y=650:w=900:h=3:color=0xA78BFA@0.95:t=fill:enable='between(t,20,39.99)'",
+        "drawbox=x='170+24*sin(t*2)':y=760:w=150:h=150:color=0x38BDF8@0.95:t=fill:enable='between(t,20,39.99)'",
+        "drawbox=x=465:y='750+24*sin(t*2+1)':w=150:h=150:color=0xA78BFA@0.95:t=fill:enable='between(t,20,39.99)'",
+        "drawbox=x='760-24*sin(t*2+2)':y=940:w=150:h=150:color=0xF59E0B@0.95:t=fill:enable='between(t,20,39.99)'",
+        "drawbox=x='320+145*sin(t*1.7)':y='900+90*cos(t*1.7)':w=72:h=72:color=0xE2E8F0@0.95:t=fill:enable='between(t,20,39.99)'",
+        "drawbox=x=485:y=920:w=110:h=5:color=0xA78BFA@0.95:t=fill:enable='between(t,20,39.99)'",
+        f"drawtext=fontfile='{font}':text='02  PROCESS  /  THE HIDDEN MECHANISM':fontcolor=white:fontsize=27:x=130:y=1110:enable='between(t,20,39.99)'",
+        # Scene 3 — assembled result travels into view and pulses.
+        "drawbox=x=90:y=650:w=900:h=560:color=0x101C2F@0.88:t=fill:enable='between(t,40,60)'",
+        "drawbox=x=90:y=650:w=900:h=3:color=0x34D399@0.95:t=fill:enable='between(t,40,60)'",
+        "drawbox=x='150+35*sin(t*1.2)':y=800:w=190:h=190:color=0x38BDF8@0.95:t=fill:enable='between(t,40,60)'",
+        "drawbox=x=445:y='790+25*sin(t*1.6)':w=190:h=190:color=0x34D399@0.95:t=fill:enable='between(t,40,60)'",
+        "drawbox=x='740-35*sin(t*1.2)':y=800:w=190:h=190:color=0xA78BFA@0.95:t=fill:enable='between(t,40,60)'",
+        f"drawtext=fontfile='{font}':text='03  RESULT  /  THE COMPLETE SYSTEM':fontcolor=white:fontsize=27:x=130:y=1110:enable='between(t,40,60)'",
+        # Moving particles and timeline make motion visible throughout the short.
+        "drawbox=x='mod(t*190,900)+90':y=1320:w=34:h=8:color=0x38BDF8@0.95:t=fill",
+        "drawbox=x=90:y=1370:w='min(900,t*15)':h=8:color=0x38BDF8@0.95:t=fill",
+        f"drawtext=fontfile='{font}':text='FOLLOW THE PROCESS':fontcolor=0xCBD5E1:fontsize=26:x=(w-text_w)/2:y=1460",
+        f"drawtext=fontfile='{font}':text='SHORTS FORGE  •  60 SECOND EXPLAINER':fontcolor=0x94A3B8:fontsize=21:x=(w-text_w)/2:y=1790",
     ]
     video_filter = ",".join(filters)
     command = [
