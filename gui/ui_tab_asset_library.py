@@ -99,8 +99,11 @@ class AssetLibrary(AbstractComponentUI):
             gr.update(choices=AssetComponentsUtils.getBackgroundMusicChoices(), interactive=True)
 
     def __get_first_preview(self):
-        '''Get the first preview'''
-        return self.__get_asset_embed(AssetDatabase.get_df(), 0)
+        '''Get the first preview, or a helpful message when no assets exist yet.'''
+        data = AssetDatabase.get_df()
+        if data.empty:
+            return "<div style='padding:1rem;color:#888'>No assets yet. Add a background video or music in the Asset library.</div>"
+        return self.__get_asset_embed(data, 0)
 
     def __delete_clicked(self, button_name):
         '''Delete an asset'''
