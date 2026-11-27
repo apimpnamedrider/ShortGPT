@@ -197,7 +197,7 @@ def _parse_scene_time(value, fallback_start, fallback_end):
 
 
 def _scene_driven_render(topic, language, work_dir, storyboard_json):
-    """Render each authored storyboard scene as its own timed animated motion-graphics sequence."""
+    """Render continuous topic-specific 2.5D isometric animation from the authored scenes."""
     try:
         storyboard = json.loads(storyboard_json) if storyboard_json else {}
     except (TypeError, ValueError):
@@ -206,11 +206,13 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     if not isinstance(scenes, list) or not 3 <= len(scenes) <= 8:
         raise ValueError("Generate a storyboard with 3 to 8 scenes before rendering.")
 
+    from PIL import Image, ImageDraw, ImageFont
+
     work_dir.mkdir(parents=True, exist_ok=True)
     output_path = VIDEO_DIR / f"shorts-forge-{uuid.uuid4().hex}.mp4"
-    font = next((item for item in FONT_CANDIDATES if Path(item).is_file()), None)
-    if not font:
-        raise RuntimeError("No usable font is installed for FFmpeg text rendering.")
+    font_path = next((item for item in FONT_CANDIDATES if Path(item).is_file()), None)
+    if not font_path:
+        raise RuntimeError("No usable font is installed for animated scene rendering.")
 
     clean_scenes = []
     cursor = 0.0
@@ -227,9 +229,9 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
         if not voice_line or not visual_line:
             raise ValueError(f"Scene {index + 1} is missing its narration or visual direction.")
         components = scene.get("components") if isinstance(scene.get("components"), list) else []
-        components = [str(x).strip()[:42] for x in components[:3] if str(x).strip()]
-        if not components:
-            components = [visual_line[:42], "HIDDEN MECHANISM", "OUTPUT"]
+        components = [str(x).strip()[:36] for x in components[:3] if str(x).strip()]
+        if len(components) < 2:
+            raise ValueError(f"Scene {index + 1} needs at least two topic-specific moving components.")
         clean_scenes.append({
             "start": start, "end": end, "voice": voice_line,
             "visual": visual_line, "components": components,
@@ -240,7 +242,6 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
 
     if len(clean_scenes) < 3:
         raise ValueError("The storyboard does not contain enough complete scenes.")
-    # Close timing gaps and clamp the complete short to exactly 60 seconds.
     clean_scenes[0]["start"] = 0.0
     for index in range(len(clean_scenes) - 1):
         clean_scenes[index]["end"] = clean_scenes[index + 1]["start"]
@@ -260,73 +261,182 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     if not audio_path.is_file() or audio_path.stat().st_size < 1000:
         raise RuntimeError("Narration audio could not be generated; refusing to create a silent video.")
 
-    # Each scene gets its own visual copy, labels, accent colour and motion interval.
-    # The scene-specific elements move continuously; this is not a still-image slideshow.
-    accents = ["0x39D5C8", "0xA78BFA", "0xF5B942", "0x60A5FA", "0xFB7185", "0x34D399"]
-    filters = [
-        "drawbox=x=0:y=0:w=1080:h=1920:color=0x070B13@1:t=fill",
-        "drawbox=x=72:y=160:w=936:h=2:color=0x263449@1:t=fill",
-        "drawbox=x='72+mod(t*180,936)':y=158:w=130:h=5:color=0x39D5C8@0.95:t=fill",
-        f"drawtext=fontfile='{font}':text='HOW IT WORKS':fontcolor=0x39D5C8:fontsize=28:x=82:y=95",
-        "drawbox=x=72:y=1690:w=936:h=3:color=0x263449@1:t=fill",
-        "drawbox=x=72:y=1690:w='936*t/60':h=4:color=0x39D5C8@0.95:t=fill",
+    # Draw at 540x960 and upscale with a high-quality Lanczos filter to 1080x1920.
+    # Every frame is newly drawn; this is continuous animation, not a slideshow.
+    width, height, fps = 540, 960, 24
+    accent_palette = [
+        (56, 213, 200), (167, 139, 250), (245, 185, 66),
+        (96, 165, 250), (251, 113, 133), (52, 211, 153)
     ]
-    for index, scene in enumerate(clean_scenes):
-        start, end = scene["start"], scene["end"]
-        accent = accents[index % len(accents)]
-        safe_start = f"{start:.3f}"
-        safe_end = f"{end - 0.02:.3f}"
-        title_file = work_dir / f"scene-{index + 1}-title.txt"
-        visual_file = work_dir / f"scene-{index + 1}-visual.txt"
-        component_files = []
-        title_file.write_text(f"{index + 1:02d}  {scene['components'][0]}", encoding="utf-8")
-        visual_file.write_text(scene["visual"][:180], encoding="utf-8")
-        for component_index, component in enumerate(scene["components"]):
-            path = work_dir / f"scene-{index + 1}-component-{component_index + 1}.txt"
-            path.write_text(component, encoding="utf-8")
-            component_files.append(path)
-        enable = f"between(t,{safe_start},{safe_end})"
-        filters.extend([
-            f"drawbox=x=70:y=520:w=940:h=930:color=0x101A2A@0.96:t=fill:enable='{enable}'",
-            f"drawbox=x=70:y=520:w=940:h=4:color={accent}@0.95:t=fill:enable='{enable}'",
-            f"drawtext=fontfile='{font}':text='SCENE {index + 1:02d} / {len(clean_scenes):02d}':fontcolor={accent}:fontsize=25:x=112:y=575:enable='{enable}'",
-            f"drawtext=fontfile='{font}':textfile='{title_file}':fontcolor=white:fontsize=35:x=112:y=640:enable='{enable}'",
-            f"drawtext=fontfile='{font}':textfile='{visual_file}':fontcolor=0xCBD5E1:fontsize=22:x=112:y=1325:line_spacing=12:enable='{enable}'",
-            # Three independently moving, labelled mechanism layers.
-            f"drawbox=x='190+55*sin(t*1.25)':y='800+18*sin(t*1.8)':w=205:h=150:color=0x172B40@1:t=fill:enable='{enable}'",
-            f"drawbox=x='438+28*sin(t*1.1+1)':y='930+22*cos(t*1.5)':w=205:h=150:color=0x1D3047@1:t=fill:enable='{enable}'",
-            f"drawbox=x='685-48*sin(t*1.2+2)':y='800+20*sin(t*1.7+2)':w=205:h=150:color=0x172B40@1:t=fill:enable='{enable}'",
-            f"drawbox=x='395+110*sin(t*1.4)':y='1085+35*cos(t*1.6)':w=290:h=5:color={accent}@0.95:t=fill:enable='{enable}'",
-            f"drawbox=x='220+mod(t*155,600)':y=1170:w=34:h=8:color={accent}@0.95:t=fill:enable='{enable}'",
-        ])
-        for component_index, path in enumerate(component_files):
-            x = [205, 453, 700][component_index]
-            y = [840, 970, 840][component_index]
-            filters.append(
-                f"drawtext=fontfile='{font}':textfile='{path}':fontcolor=white:fontsize=19:x={x}:y={y}:enable='{enable}'"
-            )
-        # Distinct camera rhythm per scene, represented by a moving scan/energy sweep.
-        if "orbit" in scene["camera"] or "rotate" in scene["camera"]:
-            filters.append(f"drawbox=x='120+mod(t*230,840)':y=1490:w=110:h=3:color={accent}@0.9:t=fill:enable='{enable}'")
-        elif "pull" in scene["camera"] or "wide" in scene["camera"]:
-            filters.append(f"drawbox=x='500-190*sin(t*0.8)':y=1490:w=110:h=3:color={accent}@0.9:t=fill:enable='{enable}'")
-        else:
-            filters.append(f"drawbox=x='120+85*sin(t*0.7)':y=1490:w=110:h=3:color={accent}@0.9:t=fill:enable='{enable}'")
+    fonts = {
+        "micro": ImageFont.truetype(font_path, 13),
+        "small": ImageFont.truetype(font_path, 16),
+        "medium": ImageFont.truetype(font_path, 20),
+        "title": ImageFont.truetype(font_path, 27),
+        "hero": ImageFont.truetype(font_path, 34),
+    }
 
-    filters.append(f"drawtext=fontfile='{font}':text='SHORTS FORGE  /  VISUAL EXPLAINER':fontcolor=0x94A3B8:fontsize=20:x=(w-text_w)/2:y=1800")
+    def wrap_words(draw, text, font, max_width, max_lines=3):
+        words = str(text).split()
+        lines, current = [], ""
+        for word in words:
+            candidate = (current + " " + word).strip()
+            if draw.textbbox((0, 0), candidate, font=font)[2] <= max_width:
+                current = candidate
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            lines[-1] = lines[-1][:max(1, len(lines[-1]) - 3)] + "..."
+        return lines
+
+    def draw_cube(draw, cx, cy, w, h, depth, label, accent, pulse):
+        # Isometric top, left and right faces with a tactile lit edge.
+        top = [(cx, cy - depth), (cx + w // 2, cy - depth // 2),
+               (cx, cy), (cx - w // 2, cy - depth // 2)]
+        left = [(cx - w // 2, cy - depth // 2), (cx, cy),
+                (cx, cy + h), (cx - w // 2, cy + h - depth // 2)]
+        right = [(cx, cy), (cx + w // 2, cy - depth // 2),
+                 (cx + w // 2, cy + h - depth // 2), (cx, cy + h)]
+        glow = tuple(min(255, int(c * (0.65 + 0.35 * pulse))) for c in accent)
+        draw.polygon(left, fill=(22, 42, 61), outline=glow)
+        draw.polygon(right, fill=(14, 29, 46), outline=glow)
+        draw.polygon(top, fill=(38, 61, 81), outline=glow)
+        draw.line(top + [top[0]], fill=glow, width=2)
+        label_lines = wrap_words(draw, label.upper(), fonts["micro"], max(42, w // 2 - 12), 2)
+        y = cy + 18
+        for line in label_lines:
+            box = draw.textbbox((0, 0), line, font=fonts["micro"])
+            draw.text((cx - (box[2] - box[0]) / 2, y), line, font=fonts["micro"], fill=(235, 244, 250))
+            y += 16
+
+    def draw_arrow(draw, x1, y1, x2, y2, accent, phase):
+        draw.line((x1, y1, x2, y2), fill=accent, width=3)
+        import math
+        angle = math.atan2(y2 - y1, x2 - x1)
+        size = 9
+        p1 = (x2, y2)
+        p2 = (x2 - size * math.cos(angle - 0.55), y2 - size * math.sin(angle - 0.55))
+        p3 = (x2 - size * math.cos(angle + 0.55), y2 - size * math.sin(angle + 0.55))
+        draw.polygon([p1, p2, p3], fill=accent)
+
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-f", "lavfi", "-i", "color=c=0x070B13:s=1080x1920:r=30:d=60",
-        "-i", str(audio_path), "-vf", ",".join(filters), "-t", "60",
-        "-c:v", "libx264", "-preset", "veryfast", "-threads", "2",
-        "-crf", "20", "-pix_fmt", "yuv420p", "-map", "0:v:0",
-        "-map", "1:a:0", "-af", "apad", "-c:a", "aac", "-b:a", "160k",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}",
+        "-r", str(fps), "-i", "-", "-i", str(audio_path),
+        "-vf", "scale=1080:1920:flags=lanczos,format=yuv420p",
+        "-t", "60", "-map", "0:v:0", "-map", "1:a:0",
+        "-af", "apad", "-c:v", "libx264", "-preset", "veryfast",
+        "-threads", "2", "-crf", "19", "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart", str(output_path),
     ]
-    _run(command, timeout=900)
+    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    total_frames = 60 * fps
+    scene_index = 0
+    try:
+        for frame_number in range(total_frames):
+            second = frame_number / fps
+            while scene_index < len(clean_scenes) - 1 and second >= clean_scenes[scene_index]["end"]:
+                scene_index += 1
+            scene = clean_scenes[scene_index]
+            scene_start, scene_end = scene["start"], scene["end"]
+            phase = max(0.0, min(1.0, (second - scene_start) / max(0.1, scene_end - scene_start)))
+            accent = accent_palette[scene_index % len(accent_palette)]
+            import math
+
+            image = Image.new("RGB", (width, height), (7, 11, 19))
+            draw = ImageDraw.Draw(image, "RGBA")
+            # Dark studio grid and subtle accent atmosphere.
+            for gy in range(260, 730, 42):
+                draw.line((28, gy, 512, gy), fill=(31, 47, 65, 90), width=1)
+            for gx in range(35, 520, 48):
+                draw.line((gx, 270, gx, 735), fill=(31, 47, 65, 55), width=1)
+            draw.line((36, 125, 504, 125), fill=(50, 67, 88, 180), width=1)
+            sweep_x = 36 + int((second * 120) % 468)
+            draw.line((sweep_x, 123, min(504, sweep_x + 65), 123), fill=accent + (255,), width=3)
+
+            draw.text((38, 48), "SHORTS FORGE  /  HOW IT WORKS", font=fonts["small"], fill=accent)
+            draw.text((38, 155), f"{scene_index + 1:02d}  /  {len(clean_scenes):02d}", font=fonts["small"], fill=(141, 160, 182))
+            title = scene["components"][0].upper()
+            title_lines = wrap_words(draw, title, fonts["hero"], 450, 2)
+            ty = 185
+            for line in title_lines:
+                draw.text((38, ty), line, font=fonts["hero"], fill=(244, 248, 252))
+                ty += 42
+
+            # Exploded components travel inward, then lock into an isometric mechanism.
+            spread = 78 * (1.0 - phase) if any(k in scene["visual"].lower() for k in ("explod", "cutaway", "separat", "inside", "reveal")) else 24
+            zoom = 1.0 + (0.10 * phase if "push" in scene["camera"] else 0.05 * (1.0 - phase))
+            bob = math.sin(second * 2.4) * 5
+            centers = [
+                int(145 - spread + 8 * math.sin(second * 1.2)),
+                int(270 + 4 * math.sin(second * 1.5 + 1)),
+                int(395 + spread + 8 * math.sin(second * 1.1 + 2)),
+            ]
+            if "orbit" in scene["camera"] or "rotate" in scene["camera"]:
+                centers = [int(x + 18 * math.sin(second * 1.4 + i * 2.1)) for i, x in enumerate(centers)]
+            sizes = [(int(105 * zoom), int(88 * zoom), int(35 * zoom))] * 3
+            # A central cutaway core pulses while the labelled components move around it.
+            core_x, core_y = 270, 520 + int(bob)
+            core_r = int(34 + 5 * math.sin(second * 3.2))
+            draw.ellipse((core_x - core_r - 9, core_y - core_r - 9, core_x + core_r + 9, core_y + core_r + 9),
+                         outline=accent + (105,), width=2)
+            draw.ellipse((core_x - core_r, core_y - core_r, core_x + core_r, core_y + core_r),
+                         fill=(17, 36, 52), outline=accent + (255,), width=3)
+            draw.ellipse((core_x - 7, core_y - 7, core_x + 7, core_y + 7), fill=accent + (255,))
+
+            for i, label in enumerate(scene["components"]):
+                cx = centers[i] if i < len(centers) else centers[-1]
+                w, h, depth = sizes[min(i, 2)]
+                cy = core_y - 85 + (i % 2) * 150 + int(7 * math.sin(second * 2 + i))
+                draw_cube(draw, cx, cy, w, h, depth, label, accent, 0.5 + 0.5 * math.sin(second * 2 + i))
+                if i < 2:
+                    draw_arrow(draw, cx + 44, cy + 35, core_x - 28 if cx < core_x else core_x + 28, core_y, accent, phase)
+
+            # Moving energy/data particles make the mechanism visibly active every frame.
+            for particle in range(9):
+                px = int(45 + ((second * 92 + particle * 53) % 450))
+                py = int(680 + 13 * math.sin(second * 3 + particle))
+                radius = 2 + (particle % 3)
+                draw.ellipse((px - radius, py - radius, px + radius, py + radius), fill=accent + (220,))
+
+            # Scene-specific visual direction and exact spoken line are shown as captions.
+            draw.rounded_rectangle((34, 765, 506, 910), radius=14, fill=(13, 23, 36, 238), outline=(48, 67, 88, 255), width=1)
+            visual_lines = wrap_words(draw, scene["visual"], fonts["small"], 430, 3)
+            vy = 784
+            for line in visual_lines:
+                draw.text((54, vy), line, font=fonts["small"], fill=(196, 210, 225))
+                vy += 22
+            caption_lines = wrap_words(draw, scene["voice"], fonts["micro"], 430, 2)
+            cy = 858
+            for line in caption_lines:
+                draw.text((54, cy), line, font=fonts["micro"], fill=(244, 248, 252))
+                cy += 17
+
+            draw.line((36, 934, 504, 934), fill=(43, 58, 77, 255), width=3)
+            draw.line((36, 934, 36 + int(468 * (second / 60)), 934), fill=accent + (255,), width=4)
+            draw.text((38, 941), "60s  /  ISOMETRIC EXPLAINER", font=fonts["micro"], fill=(116, 136, 158))
+            if process.stdin is None:
+                raise RuntimeError("The video encoder input stream is unavailable.")
+            process.stdin.write(image.tobytes())
+
+        process.stdin.close()
+        stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+        return_code = process.wait(timeout=900)
+        if return_code != 0:
+            raise RuntimeError(f"FFmpeg animation encoding failed: {stderr[-1600:]}")
+    except Exception:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        raise
+
     _validate_mp4(output_path)
     return output_path
-
 
 def render_video(topic: str, language: str, token: str, storyboard_json: str = "") -> str:
     """Render a vertical MP4 and return a Gradio-downloadable URL."""
