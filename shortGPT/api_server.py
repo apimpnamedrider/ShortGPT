@@ -89,12 +89,12 @@ async def _make_voice(text, voice, audio_path):
 
 
 def _fallback_render(topic, language, work_dir):
-    """Low-memory FFmpeg fallback; a static title card with optional narration."""
+    """Render a lightweight animated 9:16 explainer when stock footage is unavailable."""
     work_dir.mkdir(parents=True, exist_ok=True)
     safe_topic = re.sub(r"\\s+", " ", topic).strip()
     narration = _fallback_script(safe_topic)
     title_path = work_dir / "title.txt"
-    title_path.write_text(safe_topic[:90], encoding="utf-8")
+    title_path.write_text(safe_topic[:70], encoding="utf-8")
     audio_path = work_dir / "narration.mp3"
     output_path = VIDEO_DIR / f"shorts-forge-{uuid.uuid4().hex}.mp4"
 
@@ -116,24 +116,36 @@ def _fallback_render(topic, language, work_dir):
     if not font:
         raise RuntimeError("No usable font is installed for FFmpeg text rendering.")
 
-    draw = (
-        f"drawtext=fontfile='{font}':textfile='{title_path}':"
-        "fontcolor=white:fontsize=64:line_spacing=18:"
-        "x=(w-text_w)/2:y=(h-text_h)/2:"
-        "box=1:boxcolor=0x111827@0.72:boxborderw=42"
-    )
-    # Generate one static source frame per second and encode with one thread.
-    # FFmpeg repeats it to 24 fps; this avoids a 30-fps raw 1080p frame queue.
+    # All motion is generated directly by FFmpeg expressions. This avoids loading
+    # full-resolution frames into Python/RAM and produces genuine 24-fps animation.
+    filters = [
+        "drawbox=x='(W-260)*(0.5+0.5*sin(t*0.55))':y=250:w=260:h=5:color=0x38BDF8@0.8:t=fill",
+        "drawbox=x=90:y='420+110*sin(t*0.7)':w=18:h=18:color=0x38BDF8@0.9:t=fill",
+        "drawbox=x=972:y='520+130*cos(t*0.65)':w=18:h=18:color=0xA78BFA@0.9:t=fill",
+        "drawbox=x='(W/2)+300*sin(t*0.8)-14':y='960+300*cos(t*0.8)-14':w=28:h=28:color=0x38BDF8@0.95:t=fill",
+        "drawbox=x='(W/2)+300*sin(t*0.8+3.14)-14':y='960+300*cos(t*0.8+3.14)-14':w=28:h=28:color=0xA78BFA@0.95:t=fill",
+        "drawbox=x=110:y=690:w=860:h=540:color=0x101C2F@0.92:t=fill",
+        "drawbox=x=110:y=690:w=860:h=3:color=0x38BDF8@0.9:t=fill",
+        f"drawtext=fontfile='{font}':text='HOW IT WORKS':fontcolor=0x38BDF8:fontsize=34:x=(w-text_w)/2:y=760",
+        f"drawtext=fontfile='{font}':textfile='{title_path}':fontcolor=white:fontsize=58:line_spacing=16:x='(w-text_w)/2+18*sin(t*0.8)':y='890+12*sin(t*1.1)':box=1:boxcolor=0x080D18@0.35:boxborderw=24",
+        f"drawtext=fontfile='{font}':text='FOLLOW THE PROCESS':fontcolor=0xCBD5E1:fontsize=27:x=(w-text_w)/2:y=1110",
+        "drawbox=x=120:y=1370:w='min(840, t*14)':h=9:color=0x38BDF8@0.95:t=fill",
+        f"drawtext=fontfile='{font}':text='01  INPUT':fontcolor=white:fontsize=42:x=(w-text_w)/2:y=1450:enable='between(t,0,19.99)'",
+        f"drawtext=fontfile='{font}':text='02  PROCESS':fontcolor=white:fontsize=42:x=(w-text_w)/2:y=1450:enable='between(t,20,39.99)'",
+        f"drawtext=fontfile='{font}':text='03  RESULT':fontcolor=white:fontsize=42:x=(w-text_w)/2:y=1450:enable='between(t,40,60)'",
+        f"drawtext=fontfile='{font}':text='SHORTS FORGE  •  60 SECOND EXPLAINER':fontcolor=0x94A3B8:fontsize=22:x=(w-text_w)/2:y=1770",
+    ]
+    video_filter = ",".join(filters)
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-f", "lavfi", "-i", "color=c=0x080D18:s=1080x1920:r=1:d=60",
+        "-f", "lavfi", "-i", "color=c=0x080D18:s=1080x1920:r=24:d=60",
     ]
     if has_audio:
         command += ["-i", str(audio_path)]
     command += [
-        "-vf", draw, "-t", "60", "-r", "24",
-        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage",
-        "-threads", "1", "-crf", "30", "-pix_fmt", "yuv420p",
+        "-vf", video_filter, "-t", "60",
+        "-c:v", "libx264", "-preset", "ultrafast",
+        "-threads", "1", "-crf", "27", "-pix_fmt", "yuv420p",
     ]
     if has_audio:
         command += [
@@ -146,7 +158,6 @@ def _fallback_render(topic, language, work_dir):
     _run(command, timeout=900)
     _validate_mp4(output_path)
     return output_path
-
 
 def render_video(topic: str, language: str, token: str) -> str:
     """Render a vertical MP4 and return a Gradio-downloadable URL."""
