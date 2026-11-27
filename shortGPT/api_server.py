@@ -2,7 +2,9 @@ import asyncio
 import hmac
 import os
 import re
+import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -54,8 +56,22 @@ def _validate_mp4(path):
     return {"duration": round(duration, 2), "bytes": path.stat().st_size, "probe": probe}
 
 
+def _cleanup_old_outputs():
+    """Keep the persistent volume tidy without deleting recent downloads."""
+    now = time.time()
+    for item in VIDEO_DIR.iterdir():
+        try:
+            age = now - item.stat().st_mtime
+            if item.is_dir() and item.name.startswith("job-") and age > 24 * 60 * 60:
+                shutil.rmtree(item, ignore_errors=True)
+            elif item.is_file() and item.suffix.lower() == ".mp4" and age > 30 * 24 * 60 * 60:
+                item.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"Output cleanup skipped for {item.name}: {exc}")
+
+
 def _fallback_script(topic):
-    clean_topic = re.sub(r"\\s+", " ", topic).strip().rstrip(".?!")
+    clean_topic = re.sub(r"\s+", " ", topic).strip().rstrip(".?!")
     return (
         f"Here is how {clean_topic} works. "
         "Start with the basic idea: every part has a job, and each step causes the next one. "
@@ -120,7 +136,7 @@ def _fallback_render(topic, language, work_dir):
         "-pix_fmt", "yuv420p",
     ]
     if has_audio:
-        command += ["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "128k", "-shortest"]
+        command += ["-map", "0:v:0", "-map", "1:a:0", "-af", "apad", "-t", "60", "-c:a", "aac", "-b:a", "128k"]
     else:
         command += ["-an"]
     command += ["-movflags", "+faststart", str(output_path)]
@@ -140,6 +156,7 @@ def render_video(topic: str, language: str, token: str) -> str:
         raise ValueError("Enter a topic between 1 and 600 characters.")
 
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_outputs()
     work_dir = VIDEO_DIR / f"job-{uuid.uuid4().hex}"
     work_dir.mkdir(parents=True, exist_ok=True)
     output_path = None
