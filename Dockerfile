@@ -3,7 +3,7 @@ FROM python:3.10-slim-bookworm
 
 # Install FFmpeg without recommended extras and remove apt metadata.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
