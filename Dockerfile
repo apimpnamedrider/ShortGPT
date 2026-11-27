@@ -25,4 +25,4 @@ RUN mkdir -p /app/.database/videos \
 EXPOSE 31415
 
 # Do not print environment variables: they may contain API credentials.
-CMD ["python", "-u", "./runShortGPT.py"]
+CMD ["sh", "-c", "mkdir -p /app/.database/videos && python -u ./runShortGPT.py"]
