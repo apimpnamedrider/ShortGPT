@@ -38,7 +38,7 @@ def _run(command, timeout=900):
 
 
 def _validate_mp4(path):
-    if not path.is_file() or path.stat().st_size < 50_000:
+    if not path.is_file() or path.stat().st_size < 10_000:
         raise RuntimeError("The renderer did not create a usable MP4 file.")
     probe = _run([
         "ffprobe", "-v", "error", "-select_streams", "v:0",
@@ -57,7 +57,6 @@ def _validate_mp4(path):
 
 
 def _cleanup_old_outputs():
-    """Keep the persistent volume tidy without deleting recent downloads."""
     now = time.time()
     for item in VIDEO_DIR.iterdir():
         try:
@@ -71,7 +70,7 @@ def _cleanup_old_outputs():
 
 
 def _fallback_script(topic):
-    clean_topic = re.sub(r"\s+", " ", topic).strip().rstrip(".?!")
+    clean_topic = re.sub(r"\\s+", " ", topic).strip().rstrip(".?!")
     return (
         f"Here is how {clean_topic} works. "
         "Start with the basic idea: every part has a job, and each step causes the next one. "
@@ -90,12 +89,10 @@ async def _make_voice(text, voice, audio_path):
 
 
 def _fallback_render(topic, language, work_dir):
-    """Always-available FFmpeg renderer used when stock footage or AI providers fail."""
+    """Low-memory FFmpeg fallback; a static title card with optional narration."""
     work_dir.mkdir(parents=True, exist_ok=True)
     safe_topic = re.sub(r"\\s+", " ", topic).strip()
     narration = _fallback_script(safe_topic)
-    script_path = work_dir / "narration.txt"
-    script_path.write_text(narration, encoding="utf-8")
     title_path = work_dir / "title.txt"
     title_path.write_text(safe_topic[:90], encoding="utf-8")
     audio_path = work_dir / "narration.mp3"
@@ -125,18 +122,24 @@ def _fallback_render(topic, language, work_dir):
         "x=(w-text_w)/2:y=(h-text_h)/2:"
         "box=1:boxcolor=0x111827@0.72:boxborderw=42"
     )
+    # Generate one static source frame per second and encode with one thread.
+    # FFmpeg repeats it to 24 fps; this avoids a 30-fps raw 1080p frame queue.
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-f", "lavfi", "-i", "color=c=0x080D18:s=1080x1920:r=30:d=60",
+        "-f", "lavfi", "-i", "color=c=0x080D18:s=1080x1920:r=1:d=60",
     ]
     if has_audio:
         command += ["-i", str(audio_path)]
     command += [
-        "-vf", draw, "-t", "60", "-c:v", "libx264", "-preset", "veryfast",
-        "-pix_fmt", "yuv420p",
+        "-vf", draw, "-t", "60", "-r", "24",
+        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage",
+        "-threads", "1", "-crf", "30", "-pix_fmt", "yuv420p",
     ]
     if has_audio:
-        command += ["-map", "0:v:0", "-map", "1:a:0", "-af", "apad", "-t", "60", "-c:a", "aac", "-b:a", "128k"]
+        command += [
+            "-map", "0:v:0", "-map", "1:a:0", "-af", "apad",
+            "-t", "60", "-c:a", "aac", "-b:a", "96k",
+        ]
     else:
         command += ["-an"]
     command += ["-movflags", "+faststart", str(output_path)]
