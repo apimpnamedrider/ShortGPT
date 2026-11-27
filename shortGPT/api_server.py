@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import time
+import threading
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -331,6 +332,47 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
 
     _validate_mp4(output_path)
     return output_path
+
+
+_RENDER_JOBS = {}
+_RENDER_JOBS_LOCK = threading.Lock()
+
+
+def start_render_job(topic, language, token, storyboard_json):
+    """Queue a render on a daemon thread and return immediately."""
+    job_id = uuid.uuid4().hex
+    with _RENDER_JOBS_LOCK:
+        _RENDER_JOBS[job_id] = {
+            "status": "queued", "progress": 0, "videoUrl": None, "error": None,
+            "createdAt": time.time()
+        }
+
+    def run():
+        with _RENDER_JOBS_LOCK:
+            _RENDER_JOBS[job_id]["status"] = "rendering"
+        try:
+            video_url = render_video(topic, language, token, storyboard_json)
+            with _RENDER_JOBS_LOCK:
+                _RENDER_JOBS[job_id].update({
+                    "status": "completed", "progress": 100, "videoUrl": video_url
+                })
+        except Exception as exc:
+            print(f"Render job {job_id} failed: {type(exc).__name__}: {exc}")
+            with _RENDER_JOBS_LOCK:
+                _RENDER_JOBS[job_id].update({
+                    "status": "failed", "error": str(exc)[:1000]
+                })
+
+    thread = threading.Thread(target=run, name=f"render-{job_id[:8]}", daemon=True)
+    thread.start()
+    return job_id
+
+
+def get_render_job(job_id):
+    with _RENDER_JOBS_LOCK:
+        job = _RENDER_JOBS.get(job_id)
+        return dict(job) if job else None
+
 
 def render_video(topic: str, language: str, token: str, storyboard_json: str = "") -> str:
     """Render a vertical MP4 and return a Gradio-downloadable URL."""
