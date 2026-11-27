@@ -119,7 +119,7 @@ def _fallback_render(topic, language, work_dir):
     # All motion is generated directly by FFmpeg expressions. This avoids loading
     # full-resolution frames into Python/RAM and produces genuine 24-fps animation.
     filters = [
-        "drawbox=x='(W-260)*(0.5+0.5*sin(t*0.55))':y=250:w=260:h=5:color=0x38BDF8@0.8:t=fill",
+        "drawbox=x='(iw-260)*(0.5+0.5*sin(t*0.55))':y=250:w=260:h=5:color=0x38BDF8@0.8:t=fill",
         "drawbox=x=90:y='420+110*sin(t*0.7)':w=18:h=18:color=0x38BDF8@0.9:t=fill",
         "drawbox=x=972:y='520+130*cos(t*0.65)':w=18:h=18:color=0xA78BFA@0.9:t=fill",
         "drawbox=x='(W/2)+300*sin(t*0.8)-14':y='960+300*cos(t*0.8)-14':w=28:h=28:color=0x38BDF8@0.95:t=fill",
