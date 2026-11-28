@@ -1,5 +1,5 @@
 name: Shorts Forge one-time Blender E2E smoke test
-run-name: Retry after headless EGL worker fix
+run-name: Verify Blender worker after EGL fix
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
       - name: Submit one-time render through the deployed app backend
         id: submit
         env:
-          SMOKE_URL: https://api-v2.appdeploy.ai/app/shorts-forge-x24epq/api/_render-smoke/smoke-20261128-01-8d3f6a9c2e7b41d5a0c8f2e6b3d9a751
+          SMOKE_URL: https://api-v2.appdeploy.ai/app/shorts-forge-x24epq/api/_render-smoke/smoke-20261128-02-7c4a1f8d9b2e46a5c0d3f7e1a6b9c842
         run: |
           set -euo pipefail
           response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 --max-time 40 "$SMOKE_URL")"
