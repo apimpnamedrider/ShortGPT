@@ -1,4 +1,4 @@
-# Lightweight AI-video job manager. LTX performs the generative rendering remotely; this worker assembles and validates MP4s.
+# Shorts Forge worker: offline narration and local Blender mechanical CGI; no paid generation APIs.
 FROM python:3.10-slim-bookworm
 
 RUN apt-get update \
@@ -15,7 +15,12 @@ COPY . /app
 
 # Fail the image build early if the API and CGI renderer have Python syntax errors; verify Blender starts headlessly.
 RUN python -m py_compile /app/shortGPT/api_server.py /app/shortGPT/mechanical_cgi_render.py \
-    && blender --background --threads 1 --python-expr "import bpy; print('SHORTS_FORGE_BLENDER_READY', bpy.app.version_string)"
+    && echo '{"scenes":[]}' > /tmp/shortsforge-smoke.json \
+    && blender --background --threads 1 --python /app/shortGPT/mechanical_cgi_render.py -- \
+       --topic "automatic transmission" --storyboard /tmp/shortsforge-smoke.json \
+       --output /tmp/shortsforge-smoke.mp4 --fps 2 --seconds 1 --width 270 --height 480 \
+    && ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/shortsforge-smoke.mp4 \
+    && rm -f /tmp/shortsforge-smoke.json /tmp/shortsforge-smoke.mp4
 
 # One Railway volume persists rendered videos.
 RUN mkdir -p /app/.database/videos \
