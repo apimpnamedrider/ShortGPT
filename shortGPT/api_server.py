@@ -43,11 +43,13 @@ def _run(command, timeout=900):
             events = selector.select(timeout=1.0)
             if events:
                 line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
                 if line:
                     output.append(line)
                     if len(output) > 3000:
                         output = output[-2000:]
-                    match = re.search(r"FERN_PROGRESS\\s+(\\d+)\\s+(\\d+)", line)
+                    match = re.search(r"FERN_PROGRESS\s+(\d+)\s+(\d+)", line)
                     job_id = getattr(_JOB_CONTEXT, "job_id", None)
                     if match and job_id:
                         current, total = int(match.group(1)), max(1, int(match.group(2)))
