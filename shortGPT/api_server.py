@@ -12,10 +12,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from shortGPT.ltx_video_engine import render_ltx_video
 from urllib.parse import quote
-
-import edge_tts
 
 from shortGPT.config.languages import EDGE_TTS_VOICENAME_MAPPING, Language
 
@@ -194,50 +191,27 @@ def _local_voice_for(language):
 
 
 async def _make_voice(text, voice, audio_path, language="English"):
-    """Generate speech with retrying cloud voices and a local offline safety net."""
-    failures = []
-    for attempt, candidate in enumerate(_voice_candidates(language, voice), start=1):
-        try:
-            audio_path.unlink(missing_ok=True)
-            communicate = edge_tts.Communicate(text=text, voice=candidate, rate="+0%")
-            await asyncio.wait_for(communicate.save(str(audio_path)), timeout=90)
-            if audio_path.is_file() and audio_path.stat().st_size >= 1000:
-                print(f"Narration generated with Edge TTS voice {candidate}.", flush=True)
-                return
-            raise RuntimeError("The selected voice returned an empty audio file.")
-        except Exception as exc:
-            failures.append(f"{candidate}: {type(exc).__name__}: {exc}")
-            audio_path.unlink(missing_ok=True)
-            print(f"Edge TTS attempt {attempt} failed for {candidate}: {type(exc).__name__}", flush=True)
-            await asyncio.sleep(min(2 * attempt, 6))
-
-    local_voice = _local_voice_for(language)
-    if local_voice:
-        wav_path = audio_path.with_suffix(".wav")
-        try:
-            wav_path.unlink(missing_ok=True)
-            subprocess.run(
-                ["espeak-ng", "-v", local_voice, "-s", "150", "-w", str(wav_path), text],
-                capture_output=True, text=True, timeout=120, check=True
-            )
-            if not wav_path.is_file() or wav_path.stat().st_size < 1000:
-                raise RuntimeError("Offline speech engine produced an empty WAV.")
-            subprocess.run(
-                ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i",
-                 str(wav_path), "-codec:a", "libmp3lame", "-q:a", "4", str(audio_path)],
-                capture_output=True, text=True, timeout=120, check=True
-            )
-            wav_path.unlink(missing_ok=True)
-            if audio_path.is_file() and audio_path.stat().st_size >= 1000:
-                print(f"Narration generated with offline espeak-ng voice {local_voice}.", flush=True)
-                return
-        except Exception as exc:
-            wav_path.unlink(missing_ok=True)
-            failures.append(f"offline {local_voice}: {type(exc).__name__}: {exc}")
-    raise RuntimeError(
-        "Narration generation failed after cloud retries and offline fallback. "
-        + " | ".join(failures[-6:])[-1200:]
-    )
+    """Generate narration entirely offline; no cloud TTS requests or usage charges."""
+    local_voice = _local_voice_for(language) or "en"
+    wav_path = audio_path.with_suffix(".wav")
+    try:
+        wav_path.unlink(missing_ok=True)
+        subprocess.run(
+            ["espeak-ng", "-v", local_voice, "-s", "145", "-w", str(wav_path), str(text)],
+            capture_output=True, text=True, timeout=180, check=True
+        )
+        if not wav_path.is_file() or wav_path.stat().st_size < 1000:
+            raise RuntimeError("Offline speech engine produced an empty WAV.")
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(wav_path),
+             "-codec:a", "libmp3lame", "-q:a", "4", str(audio_path)],
+            capture_output=True, text=True, timeout=120, check=True
+        )
+        if not audio_path.is_file() or audio_path.stat().st_size < 1000:
+            raise RuntimeError("Offline speech conversion produced an empty audio file.")
+        print("Narration generated locally with espeak-ng voice " + local_voice + ".", flush=True)
+    finally:
+        wav_path.unlink(missing_ok=True)
 
 
 def _parse_scene_time(value, fallback_start, fallback_end):
@@ -324,19 +298,34 @@ def get_render_job(job_id):
 
 
 
+def _write_captions(scenes, path):
+    lines = []
+    for index, scene in enumerate(scenes):
+        text = str(scene.get("voice") or scene.get("narration") or "").strip()
+        if not text:
+            continue
+        start = index * 6
+        end = start + 6
+        def stamp(seconds):
+            millis = int(round(seconds * 1000))
+            hours, millis = divmod(millis, 3600000)
+            minutes, millis = divmod(millis, 60000)
+            secs, millis = divmod(millis, 1000)
+            return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+        lines.extend([str(index + 1), stamp(start) + " --> " + stamp(end), text, ""])
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_video(topic: str, language: str, token: str, storyboard_json: str = "", ltx_api_key: str = "") -> str:
-    """Generate an AI video; keep only the finished MP4 on the persistent Railway volume."""
+    """Render a 60-second mechanical CGI Short locally, with no paid generation API."""
     expected_token = os.environ.get("SHORTGPT_API_TOKEN", "")
     if not expected_token or not hmac.compare_digest(str(token or ""), expected_token):
         raise ValueError("Invalid worker token.")
-
     topic = (topic or "").strip()
     if not topic or len(topic) > 600:
         raise ValueError("Enter a topic between 1 and 600 characters.")
     if not storyboard_json:
         raise ValueError("A scene-by-scene storyboard is required. Generate a script before rendering.")
-    if not ltx_api_key or not ltx_api_key.strip():
-        raise ValueError("The LTX generative video model is not connected. Add LTX_API_KEY in Shorts Forge settings.")
     try:
         storyboard = json.loads(storyboard_json)
     except (TypeError, ValueError):
@@ -348,38 +337,62 @@ def render_video(topic: str, language: str, token: str, storyboard_json: str = "
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     _cleanup_old_outputs()
     output_path = VIDEO_DIR / ("shorts-forge-" + uuid.uuid4().hex + ".mp4")
-    # Raw clips, continuity frames and narration are temporary. Only the final MP4
-    # is retained on the small persistent Railway volume.
-    work_dir = Path(tempfile.mkdtemp(prefix="shortsforge-job-"))
-    selected_voice = "en-ZA-LukeNeural"
+    work_dir = Path(tempfile.mkdtemp(prefix="shortsforge-cgi-"))
+    silent_path = work_dir / "mechanical-cgi-silent.mp4"
+    audio_path = work_dir / "narration.mp3"
+    storyboard_path = work_dir / "storyboard.json"
+    captions_path = work_dir / "captions.srt"
+    temporary_final = work_dir / "finished.tmp.mp4"
     try:
-        try:
-            selected_language = Language(language)
-            selected_voice = EDGE_TTS_VOICENAME_MAPPING[selected_language]["male"]
-        except Exception:
-            pass
+        storyboard_path.write_text(json.dumps(storyboard, ensure_ascii=False), encoding="utf-8")
+        _write_captions(scenes, captions_path)
+        narration = " ".join(str(scene.get("voice") or scene.get("narration") or "").strip()
+                             for scene in scenes).strip()
+        if not narration:
+            raise ValueError("The storyboard has no narration text.")
+        _set_job_stage("Generating offline narration", 5)
+        asyncio.run(_make_voice(narration, "", audio_path, language))
 
-        render_ltx_video(
-            topic=topic,
-            language=language,
-            work_dir=work_dir,
-            output_path=output_path,
-            storyboard=storyboard,
-            api_key=ltx_api_key,
-            voice_name=selected_voice,
-            voice_generator=_make_voice,
-            progress=lambda current, total, stage: _set_job_stage(
-                stage, 10 + int(75 * current / max(1, total))
-            ),
-        )
+        _set_job_stage("Building animated mechanical CGI", 8)
+        renderer = Path(__file__).with_name("mechanical_cgi_render.py")
+        if not renderer.is_file():
+            raise RuntimeError("The new mechanical CGI renderer is missing from the worker image.")
+        blender = shutil.which("blender")
+        if not blender:
+            raise RuntimeError("Blender is not installed. The worker image must include Blender.")
+        _run([
+            blender, "--background", "--threads", "1", "--python", str(renderer), "--",
+            "--topic", topic, "--storyboard", str(storyboard_path),
+            "--output", str(silent_path), "--fps", "12", "--seconds", "60",
+            "--width", "540", "--height", "960"
+        ], timeout=7200)
+        if not silent_path.is_file() or silent_path.stat().st_size < 10000:
+            raise RuntimeError("Blender did not produce a valid silent CGI video.")
+
+        _set_job_stage("Assembling narration, captions and final MP4", 88)
+        subtitles_filter = "subtitles='" + str(captions_path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'") + "':force_style='FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101824,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=100'"
+        _run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(silent_path), "-i", str(audio_path),
+            "-vf", subtitles_filter + ",scale=1080:1920:flags=lanczos,fps=24,format=yuv420p",
+            "-af", "apad=pad_dur=60,atrim=0:60",
+            "-t", "60", "-r", "24", "-c:v", "libx264", "-preset", "ultrafast",
+            "-crf", "25", "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+            "-movflags", "+faststart", str(temporary_final)
+        ], timeout=1800)
+        if not temporary_final.is_file():
+            raise RuntimeError("FFmpeg did not create the completed MP4.")
+        _validate_mp4(temporary_final)
+        os.replace(str(temporary_final), str(output_path))
         _validate_mp4(output_path)
         public_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
         if not public_domain:
             raise RuntimeError("Railway public domain is not configured.")
         return "https://" + public_domain + "/gradio_api/file=" + quote(str(output_path), safe="/")
     except Exception:
-        if output_path.exists():
-            output_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+        temporary_final.unlink(missing_ok=True)
         raise
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
