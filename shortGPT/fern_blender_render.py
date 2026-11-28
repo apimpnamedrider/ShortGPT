@@ -19,8 +19,8 @@ scene.cycles.samples=6
 scene.cycles.use_denoising=False
 scene.render.threads_mode="FIXED"
 scene.render.threads=2
-scene.render.resolution_x=720
-scene.render.resolution_y=1280
+scene.render.resolution_x=900
+scene.render.resolution_y=1600
 scene.render.resolution_percentage=100
 scene.render.fps=8
 scene.render.fps_base=1
@@ -239,9 +239,18 @@ for si,(s,start,end) in enumerate(groups):
     # Each beat is built from its own narrated parts; no generic central mechanism is reused.
     count=len(components)
     for j,label in enumerate(components):
-        angle=(j/max(1,count))*math.tau-math.pi/2
-        final=(math.cos(angle)*1.25,math.sin(angle)*1.15,0.22+(j%2)*0.18)
-        exploded=(final[0]*1.55,final[1]*1.55,final[2]+1.25)
+        # Give every beat a different blocking pattern so the film does not
+        # repeat the same circular product arrangement in every scene.
+        spread = j-(count-1)/2
+        if si % 4 == 0:
+            final=(spread*1.65,0.0,0.22+(j%2)*0.16)                 # horizontal reveal
+        elif si % 4 == 1:
+            final=(0.0,spread*1.30,0.22+(j%2)*0.16)                 # vertical exploded stack
+        elif si % 4 == 2:
+            final=(spread*1.35,spread*0.72,0.22+(j%2)*0.16)         # diagonal process chain
+        else:
+            final=((j%2)*1.65-0.82,(j//2)*1.45-0.72,0.22+(j%2)*0.16) # modular cutaway grid
+        exploded=(final[0]*1.30,final[1]*1.30,final[2]+1.05)
         parts=build_component(label,exploded,ivory,accent)
         for part in parts:
             part.keyframe_insert("location",frame=f0)
@@ -265,7 +274,8 @@ for si,(s,start,end) in enumerate(groups):
             bead.location=(x+0.45,-0.15,1.35)
             bead.keyframe_insert("location",frame=f1)
             created.append(bead)
-    label=text_obj(components[0],(-2.5,0,2.65),0.15,ivory,cam.rotation_euler)
+    shot_caption = str(s.get("visual") or components[0]).split(";")[0][:48]
+    label=text_obj(shot_caption,(-2.5,0,2.65),0.13,ivory,cam.rotation_euler)
     created.append(label)
     # Hide each beat outside its exact timeline interval.
     for obj in created:
