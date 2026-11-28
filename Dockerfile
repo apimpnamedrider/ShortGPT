@@ -1,4 +1,4 @@
-# Minimal CPU-based 3D renderer image. The Shorts Forge worker does not load the legacy Gradio UI or ML stack.
+# Lightweight AI-video job manager. LTX performs the generative rendering remotely; this worker assembles and validates MP4s.
 FROM python:3.10-slim-bookworm
 
 RUN apt-get update \
@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir -r forge-requirements.txt
 
 COPY . /app
 
-# Fail the image build early if the API or mechanical CGI Blender script has Python syntax errors.
+# Fail the image build early if the API or LTX video engine has Python syntax errors.
 RUN python -m py_compile /app/shortGPT/api_server.py /app/shortGPT/ltx_video_engine.py
 
 # One Railway volume persists rendered videos.
