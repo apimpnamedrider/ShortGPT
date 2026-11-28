@@ -64,7 +64,6 @@ def finish(obj, mat, bevel=0.0):
         mod = obj.modifiers.new("Precision edge radii", "BEVEL")
         mod.width = bevel
         mod.segments = 2
-        obj.modifiers.new("Weighted machined normals", "WEIGHTED_NORMAL")
     return obj
 
 def cube(name, loc, scale, mat, bevel=0.08):
@@ -119,7 +118,6 @@ def gear(name, x, radius, thickness, teeth, mat):
     bevel = obj.modifiers.new("Gear tooth edge bevel", "BEVEL")
     bevel.width = 0.012
     bevel.segments = 2
-    obj.modifiers.new("Gear weighted normals", "WEIGHTED_NORMAL")
     return obj
 
 def add_bolt_ring(x, radius, count=12):
