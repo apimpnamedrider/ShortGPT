@@ -12,14 +12,19 @@ if not 3 <= len(scenes) <= 10:
 bpy.ops.object.select_all(action="SELECT")
 bpy.ops.object.delete(use_global=False)
 scene=bpy.context.scene
-scene.render.engine="BLENDER_WORKBENCH"
-scene.render.resolution_x=540
-scene.render.resolution_y=960
+scene.render.engine="CYCLES"
+scene.cycles.device="CPU"
+scene.cycles.samples=4
+scene.cycles.use_denoising=True
+scene.render.threads_mode="FIXED"
+scene.render.threads=4
+scene.render.resolution_x=450
+scene.render.resolution_y=800
 scene.render.resolution_percentage=100
-scene.render.fps=12
+scene.render.fps=8
 scene.render.fps_base=1
 scene.frame_start=1
-scene.frame_end=720
+scene.frame_end=480
 scene.render.image_settings.file_format="FFMPEG"
 scene.render.ffmpeg.format="MPEG4"
 scene.render.ffmpeg.codec="H264"
@@ -47,6 +52,12 @@ def mat(name, color, metallic=0.0, roughness=0.45):
     m.diffuse_color=(*color,1)
     m.metallic=metallic
     m.roughness=roughness
+    m.use_nodes=True
+    shader=m.node_tree.nodes.get("Principled BSDF")
+    if shader:
+        shader.inputs["Base Color"].default_value=(*color,1)
+        shader.inputs["Metallic"].default_value=metallic
+        shader.inputs["Roughness"].default_value=roughness
     return m
 ivory=mat("Matte porcelain resin",(0.82,0.85,0.88),0.08,0.38)
 silver=mat("Brushed anodized aluminium",(0.42,0.49,0.55),0.72,0.28)
@@ -157,9 +168,9 @@ for si,(s,start,end) in enumerate(groups):
     if len(components)<3:
         components=(components+["Drive assembly","Transfer chamber","Output coupling"])[:3]
     components=[str(x)[:34] for x in components[:4]]
-    f0=max(1,int(start*12)+1)
-    f1=max(f0+1,int((start+(end-start)*0.42)*12))
-    f2=max(f1+1,int(end*12))
+    f0=max(1,int(start*8)+1)
+    f1=max(f0+1,int((start+(end-start)*0.42)*8))
+    f2=max(f1+1,int(end*8))
     created=[]
     # Topic-specific miniature assembly with multiple distinct machined forms.
     core=cyl("Central mechanism housing",(0,0,0.35),0.88,0.72,dark)
@@ -243,6 +254,14 @@ for si,(s,start,end) in enumerate(groups):
             cam.data.keyframe_insert("ortho_scale",frame=f2)
     scene.frame_set(f0)
 
+# Report actual rendered-frame progress to the worker's job tracker.
+_rendered = {"count": 0}
+def _report_render_progress(_scene):
+    _rendered["count"] += 1
+    if _rendered["count"] % 8 == 0 or _rendered["count"] >= scene.frame_end:
+        print(f"FERN_PROGRESS {_rendered['count']} {scene.frame_end}", flush=True)
+bpy.app.handlers.render_post.append(_report_render_progress)
+
 # Smooth interpolation; preserve single-axis camera choreography.
 for obj in bpy.data.objects:
     if obj.animation_data and obj.animation_data.action:
@@ -256,4 +275,4 @@ scene.render.filepath=output_path
 bpy.ops.render.render(animation=True)
 if not os.path.isfile(output_path) or os.path.getsize(output_path)<10000:
     raise RuntimeError("Blender did not produce a usable MP4")
-print("FERN_3D_RENDER_COMPLETE",os.path.getsize(output_path))
+print("FERN_3D_RENDER_COMPLETE",os.path.getsize(output_path), flush=True)
