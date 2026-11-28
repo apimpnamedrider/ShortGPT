@@ -1,4 +1,5 @@
 import bpy, sys, json, math, os, re
+import subprocess
 from mathutils import Vector
 
 argv = sys.argv[sys.argv.index("--")+1:] if "--" in sys.argv else []
@@ -408,4 +409,15 @@ scene.render.filepath=output_path
 bpy.ops.render.render(animation=True)
 if not os.path.isfile(output_path) or os.path.getsize(output_path)<10000:
     raise RuntimeError("Mechanical CGI renderer did not create a usable MP4.")
+
+# Blender 3.4 may log a delayed-frame disk error but still return from render().
+# Never report completion until FFprobe confirms a readable H.264 video stream.
+probe = subprocess.run(
+    ["ffprobe", "-v", "error", "-select_streams", "v:0",
+     "-show_entries", "stream=codec_name,width,height",
+     "-of", "default=noprint_wrappers=1", output_path],
+    capture_output=True, text=True, timeout=30
+)
+if probe.returncode != 0 or "codec_name=h264" not in probe.stdout or "width=540" not in probe.stdout or "height=960" not in probe.stdout:
+    raise RuntimeError("Mechanical CGI MP4 failed validation; Blender may have run out of disk space. " + (probe.stderr or probe.stdout)[-800:])
 print("MECHANICAL_CGI_RENDER_COMPLETE",os.path.getsize(output_path),flush=True)
