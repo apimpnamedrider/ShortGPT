@@ -1,4 +1,5 @@
 name: Shorts Forge one-time Blender E2E smoke test
+run-name: Retry after headless EGL worker fix
 
 on:
   push:
