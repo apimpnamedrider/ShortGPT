@@ -100,16 +100,41 @@ def _validate_mp4(path):
 
 
 def _cleanup_old_outputs():
+    """Recover volume space without touching the newest preview videos."""
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     now = time.time()
-    for item in VIDEO_DIR.iterdir():
+    entries = list(VIDEO_DIR.iterdir())
+    # Render jobs are serialized, so old work folders are always safe to remove.
+    for item in entries:
         try:
-            age = now - item.stat().st_mtime
-            if item.is_dir() and item.name.startswith("job-") and age > 24 * 60 * 60:
+            if item.is_dir() and item.name.startswith("job-") and now - item.stat().st_mtime > 10 * 60:
                 shutil.rmtree(item, ignore_errors=True)
-            elif item.is_file() and item.suffix.lower() == ".mp4" and age > 30 * 24 * 60 * 60:
+            elif item.is_file() and item.suffix.lower() == ".mp4" and now - item.stat().st_mtime > 30 * 24 * 60 * 60:
                 item.unlink(missing_ok=True)
         except OSError as exc:
             print(f"Output cleanup skipped for {item.name}: {exc}")
+
+    usage = shutil.disk_usage(VIDEO_DIR)
+    if usage.free < 180 * 1024 * 1024:
+        completed = sorted(
+            (p for p in VIDEO_DIR.glob("shorts-forge-*.mp4") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        # Retain the two newest completed previews; remove older ones only when space is tight.
+        while usage.free < 220 * 1024 * 1024 and len(completed) > 2:
+            oldest = completed.pop(0)
+            try:
+                oldest.unlink(missing_ok=True)
+                print(f"Removed old preview to recover render storage: {oldest.name}", flush=True)
+            except OSError as exc:
+                print(f"Could not remove old preview {oldest.name}: {exc}", flush=True)
+            usage = shutil.disk_usage(VIDEO_DIR)
+
+    if usage.free < 120 * 1024 * 1024:
+        raise RuntimeError(
+            f"Not enough render storage: only {usage.free // (1024 * 1024)} MB free. "
+            "Download and remove older videos or increase the Railway volume."
+        )
 
 
 def _voice_candidates(language, preferred_voice):
@@ -321,6 +346,15 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     if not silent_path.is_file() or silent_path.stat().st_size < 10000:
         raise RuntimeError("Blender completed without producing its 3D scene video.")
 
+    # Blender can exit 0 after an FFmpeg disk-write failure; probe the container before encoding.
+    scene_probe = _run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=codec_name,width,height",
+        "-of", "default=noprint_wrappers=1", str(silent_path),
+    ], timeout=30)
+    if "codec_name=" not in scene_probe or "width=540" not in scene_probe or "height=960" not in scene_probe:
+        raise RuntimeError("Blender's intermediate CGI MP4 is incomplete or corrupt; refusing to encode it.")
+
     _set_job_stage("Encoding vertical MP4", 88)
     _run([
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
@@ -333,6 +367,8 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     ], timeout=900)
     _set_job_stage("Validating finished MP4", 98)
     _validate_mp4(output_path)
+    # The silent CGI video, narration and storyboard are temporary; retain only the final MP4.
+    shutil.rmtree(work_dir, ignore_errors=True)
     return output_path
 
 
