@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -r forge-requirements.txt
 
 COPY . /app
 
+# Fail the image build early if the API or mechanical CGI Blender script has Python syntax errors.
+RUN python -m py_compile /app/shortGPT/api_server.py /app/shortGPT/mechanical_cgi_render.py
+
 # One Railway volume persists rendered videos.
 RUN mkdir -p /app/.database/videos \
     && rm -rf /app/videos \
