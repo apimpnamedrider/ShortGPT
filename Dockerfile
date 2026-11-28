@@ -3,7 +3,7 @@ FROM python:3.10-slim-bookworm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ffmpeg fonts-dejavu-core espeak-ng blender \
+        ffmpeg fonts-dejavu-core espeak-ng blender libegl1 libgl1-mesa-dri libglx-mesa0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
