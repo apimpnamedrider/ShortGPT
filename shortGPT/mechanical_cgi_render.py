@@ -102,7 +102,7 @@ def gear(name, x, radius, thickness, teeth, mat):
     verts = []
     for xx in (-thickness / 2, thickness / 2):
         for y, z in outline:
-            verts.append((x + xx, y, z))
+            verts.append((xx, y, z))
     faces = []
     for i in range(n):
         j = (i + 1) % n
@@ -114,6 +114,7 @@ def gear(name, x, radius, thickness, teeth, mat):
     mesh.materials.append(mat)
     mesh.update()
     obj = bpy.data.objects.new(name, mesh)
+    obj.location = (x, 0, 0)
     bpy.context.collection.objects.link(obj)
     bevel = obj.modifiers.new("Gear tooth edge bevel", "BEVEL")
     bevel.width = 0.012
@@ -251,15 +252,17 @@ camera.keyframe_insert(data_path="location", frame=FPS*SECONDS)
 camera.keyframe_insert(data_path="rotation_euler", frame=FPS*SECONDS)
 
 # Animate each real component: continuous rotation and a coordinated exploded/reassembly pulse.
-for obj, speed in animated:
+for index, (obj, speed) in enumerate(animated):
     obj.rotation_mode = "XYZ"
     base = obj.location.copy()
     obj.keyframe_insert(data_path="location", frame=1)
     obj.keyframe_insert(data_path="rotation_euler", frame=1)
     obj.rotation_euler.x += speed * (SECONDS / (2*math.pi))
     obj.keyframe_insert(data_path="rotation_euler", frame=FPS*SECONDS)
-    # A subtle linear separation at the middle of the film, then return.
-    obj.location.x = base.x + (0.12 if abs(speed) > 0.5 else 0.0)
+    # Mid-film exploded assembly: alternate parts separate along the real shaft axis.
+    direction = -1.0 if index % 2 else 1.0
+    separation = direction * (0.42 if abs(speed) > 0.5 else 0.28)
+    obj.location.x = base.x + separation
     obj.keyframe_insert(data_path="location", frame=FPS*15)
     obj.location.x = base.x
     obj.keyframe_insert(data_path="location", frame=FPS*30)
