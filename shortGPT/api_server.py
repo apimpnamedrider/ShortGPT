@@ -209,7 +209,7 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     _set_job_stage("Starting CPU-based 3D render", 10)
     print(f"Starting Blender CPU Cycles 3D render: {len(clean_scenes)} scenes, 8 fps, 450x800.")
     _run([
-        blender, "-b", "--threads", "4", "--python", str(blender_script), "--",
+        blender, "-b", "--threads", "2", "--python", str(blender_script), "--",
         str(storyboard_path), str(silent_path),
     ], timeout=3600)
     if not silent_path.is_file() or silent_path.stat().st_size < 10000:
@@ -233,6 +233,7 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
 _RENDER_JOBS = {}
 _RENDER_JOBS_LOCK = threading.Lock()
 _JOB_CONTEXT = threading.local()
+_RENDER_SEMAPHORE = threading.Semaphore(1)
 
 
 def _set_job_stage(stage, progress):
@@ -258,18 +259,23 @@ def start_render_job(topic, language, token, storyboard_json):
 
     def run():
         _JOB_CONTEXT.job_id = job_id
-        with _RENDER_JOBS_LOCK:
-            _RENDER_JOBS[job_id].update({"status": "rendering", "stage": "Preparing storyboard",
-                                         "progress": 3, "updatedAt": time.time()})
         try:
-            video_url = render_video(topic, language, token, storyboard_json)
+            with _RENDER_JOBS_LOCK:
+                _RENDER_JOBS[job_id].update({"status": "queued", "stage": "Waiting for render slot",
+                                             "progress": 1, "updatedAt": time.time()})
+            # One Blender process at a time: this 1 GB worker cannot safely render concurrently.
+            with _RENDER_SEMAPHORE:
+                with _RENDER_JOBS_LOCK:
+                    _RENDER_JOBS[job_id].update({"status": "rendering", "stage": "Preparing storyboard",
+                                                 "progress": 3, "updatedAt": time.time()})
+                video_url = render_video(topic, language, token, storyboard_json)
             with _RENDER_JOBS_LOCK:
                 _RENDER_JOBS[job_id].update({
                     "status": "completed", "progress": 100, "stage": "Complete",
                     "videoUrl": video_url, "updatedAt": time.time()
                 })
         except Exception as exc:
-            print(f"Render job {job_id} failed: {type(exc).__name__}: {exc}")
+            print(f"Render job {job_id} failed: {type(exc).__name__}: {exc}", flush=True)
             with _RENDER_JOBS_LOCK:
                 _RENDER_JOBS[job_id].update({
                     "status": "failed", "stage": "Failed",
