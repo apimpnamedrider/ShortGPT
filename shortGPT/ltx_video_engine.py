@@ -190,7 +190,8 @@ def render_ltx_video(topic, language, work_dir, output_path, storyboard, api_key
             "resolution": "1080x1920",
             "duration": CLIP_SECONDS,
             "model": MODEL,
-            "guidance_scale": 8.0,
+            "fps": 24,
+            "generate_audio": True,
         }
         # First shot is generated from text; later shots use the previous final frame
         # as an image reference so the machine and material identity stay coherent.
