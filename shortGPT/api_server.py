@@ -167,9 +167,19 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
             raise ValueError(
                 f"Scene {index + 1} contains {words} spoken words. Split it into shorter narration-matched shots."
             )
+        illustration_line = str(scene.get("illustration") or "").strip()
+        animation_line = str(scene.get("animation") or "").strip()
+        camera_detail_line = str(scene.get("cameraDetail") or "").strip()
+        if not illustration_line or not animation_line or not camera_detail_line:
+            raise ValueError(
+                f"Scene {index + 1} needs a detailed illustration, subject animation, and camera plan."
+            )
         clean_scenes.append({
             "voice": voice_line,
             "visual": visual_line,
+            "illustration": illustration_line[:900],
+            "animation": animation_line[:700],
+            "cameraDetail": camera_detail_line[:500],
             "components": components,
             "camera": str(scene.get("camera") or "macro push-in"),
             "sfx": str(scene.get("sfx") or "").strip(),
