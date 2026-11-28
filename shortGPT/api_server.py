@@ -107,7 +107,8 @@ def _cleanup_old_outputs():
     # Render jobs are serialized, so old work folders are always safe to remove.
     for item in entries:
         try:
-            if item.is_dir() and item.name.startswith("job-") and now - item.stat().st_mtime > 10 * 60:
+            if item.is_dir() and item.name.startswith("job-"):
+                # The render semaphore guarantees no other job is actively writing here.
                 shutil.rmtree(item, ignore_errors=True)
             elif item.is_file() and item.suffix.lower() == ".mp4" and now - item.stat().st_mtime > 30 * 24 * 60 * 60:
                 item.unlink(missing_ok=True)
