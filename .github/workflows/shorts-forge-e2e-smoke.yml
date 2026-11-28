@@ -1,0 +1,108 @@
+name: Shorts Forge one-time Blender E2E smoke test
+
+on:
+  push:
+    branches:
+      - diagnostics/shorts-forge-e2e-20261128
+    paths:
+      - .github/workflows/shorts-forge-e2e-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  render-and-download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Submit one-time render through the deployed app backend
+        id: submit
+        env:
+          SMOKE_URL: https://shorts-forge-x24epq.v2.appdeploy.ai/api/_render-smoke/smoke-20261128-01-8d3f6a9c2e7b41d5a0c8f2e6b3d9a751
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 --max-time 40 "$SMOKE_URL")"
+          echo "$response"
+          job_id="$(jq -er '.jobId' <<< "$response")"
+          if [[ ! "$job_id" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "The app did not return a valid render job ID."
+            exit 1
+          fi
+          echo "job_id=$job_id" >> "$GITHUB_OUTPUT"
+          echo "Render job submitted: $job_id" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Poll the app backend until Blender finishes
+        id: poll
+        env:
+          JOB_ID: ${{ steps.submit.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          status_url="https://shorts-forge-x24epq.v2.appdeploy.ai/api/render-jobs/$JOB_ID"
+          deadline=$((SECONDS + 2100))
+          completed=false
+          while (( SECONDS < deadline )); do
+            response="$(curl --fail --silent --show-error --max-time 30 "$status_url")"
+            status="$(jq -er '.status' <<< "$response")"
+            elapsed=$((2100 - (deadline - SECONDS)))
+            echo "[$elapsed seconds] $status"
+            if [[ "$status" == "failed" ]]; then
+              error_text="$(jq -r '.error // "No error detail returned."' <<< "$response")"
+              echo "Blender render failed: $error_text"
+              {
+                echo "### Render failed"
+                echo "$error_text"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            if [[ "$status" == "completed" ]]; then
+              verified="$(jq -r '.mp4Verified // false' <<< "$response")"
+              if [[ "$verified" != "true" ]]; then
+                echo "Job completed but MP4 verification was not confirmed."
+                exit 1
+              fi
+              echo "completed=true" >> "$GITHUB_OUTPUT"
+              echo "$response" > /tmp/shorts-forge-job.json
+              echo "The app backend reports a completed render and a verified MP4 endpoint." >> "$GITHUB_STEP_SUMMARY"
+              completed=true
+              break
+            fi
+            sleep 15
+          done
+          if [[ "$completed" != "true" ]]; then
+            echo "Render job exceeded the 35-minute smoke-test window."
+            exit 1
+          fi
+
+      - name: Download MP4 and inspect the actual media streams
+        env:
+          JOB_ID: ${{ steps.submit.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          download_url="https://shorts-forge-x24epq.v2.appdeploy.ai/api/render-download/$JOB_ID"
+          curl --fail --location --silent --show-error --retry 2 --retry-delay 2 --max-time 360 "$download_url" -o /tmp/shorts-forge-smoke.mp4
+          test -s /tmp/shorts-forge-smoke.mp4
+          probe="$(ffprobe -v error -show_entries format=duration,size:stream=codec_type,codec_name,width,height -of json /tmp/shorts-forge-smoke.mp4)"
+          echo "$probe"
+          width="$(jq -er '[.streams[] | select(.codec_type=="video")][0].width' <<< "$probe")"
+          height="$(jq -er '[.streams[] | select(.codec_type=="video")][0].height' <<< "$probe")"
+          duration="$(jq -er '.format.duration' <<< "$probe")"
+          bytes="$(stat -c %s /tmp/shorts-forge-smoke.mp4)"
+          video_codec="$(jq -er '[.streams[] | select(.codec_type=="video")][0].codec_name' <<< "$probe")"
+          audio_codec="$(jq -er '[.streams[] | select(.codec_type=="audio")][0].codec_name' <<< "$probe")"
+          awk -v d="$duration" 'BEGIN { if (d < 55 || d > 65) exit 1 }' || {
+            echo "MP4 duration is outside the expected 55-65 second window."
+            exit 1
+          }
+          [[ "$width" == "1080" && "$height" == "1920" ]]
+          [[ "$bytes" -gt 10000 ]]
+          {
+            echo "### End-to-end Blender MP4 verification passed"
+            echo "- Download followed the app's authenticated backend handoff."
+            echo "- Container file: MP4"
+            echo "- Video: $video_codec, ${width} x ${height}"
+            echo "- Audio: $audio_codec"
+            echo "- Duration: ${duration} s"
+            echo "- File size: $bytes bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
