@@ -15,7 +15,8 @@ scene=bpy.context.scene
 scene.render.engine="CYCLES"
 scene.cycles.device="CPU"
 scene.cycles.samples=4
-scene.cycles.use_denoising=True
+# Headless Blender package has no available OpenImageDenoiser device.
+scene.cycles.use_denoising=False
 scene.render.threads_mode="FIXED"
 scene.render.threads=2
 scene.render.resolution_x=450
