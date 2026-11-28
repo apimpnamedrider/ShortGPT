@@ -3,7 +3,7 @@ FROM python:3.10-slim-bookworm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ffmpeg fonts-dejavu-core blender espeak-ng \
+        ffmpeg fonts-dejavu-core espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r forge-requirements.txt
 COPY . /app
 
 # Fail the image build early if the API or mechanical CGI Blender script has Python syntax errors.
-RUN python -m py_compile /app/shortGPT/api_server.py /app/shortGPT/mechanical_cgi_render.py
+RUN python -m py_compile /app/shortGPT/api_server.py /app/shortGPT/ltx_video_engine.py
 
 # One Railway volume persists rendered videos.
 RUN mkdir -p /app/.database/videos \
