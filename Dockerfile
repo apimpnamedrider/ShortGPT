@@ -3,7 +3,7 @@ FROM python:3.10-slim-bookworm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ffmpeg fonts-dejavu-core espeak-ng \
+        ffmpeg fonts-dejavu-core espeak-ng blender \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -13,8 +13,9 @@ RUN pip install --no-cache-dir -r forge-requirements.txt
 
 COPY . /app
 
-# Fail the image build early if the API or LTX video engine has Python syntax errors.
-RUN python -m py_compile /app/shortGPT/api_server.py /app/shortGPT/ltx_video_engine.py
+# Fail the image build early if the API and CGI renderer have Python syntax errors; verify Blender starts headlessly.
+RUN python -m py_compile /app/shortGPT/api_server.py /app/shortGPT/mechanical_cgi_render.py \
+    && blender --background --threads 1 --python-expr "import bpy; print('SHORTS_FORGE_BLENDER_READY', bpy.app.version_string)"
 
 # One Railway volume persists rendered videos.
 RUN mkdir -p /app/.database/videos \
