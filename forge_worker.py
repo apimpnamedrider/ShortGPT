@@ -26,6 +26,7 @@ async def create_render_job(request: Request):
         str(payload.get("language") or "English"),
         str(payload.get("token") or ""),
         str(payload.get("storyboard") or ""),
+        str(payload.get("ltxApiKey") or ""),
     )
     return JSONResponse({"jobId": job_id, "status": "queued"})
 
