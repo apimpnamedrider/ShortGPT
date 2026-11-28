@@ -269,20 +269,30 @@ for si,(s,start,end) in enumerate(groups):
     f1=max(f0+1,int((start+(end-start)*0.48)*8))
     f2=max(f1+1,int(end*8))
     created=[]
-    # Each beat is built from its own narrated parts; no generic central mechanism is reused.
+    # Each beat is built from its own narrated parts; the illustration direction
+    # controls blocking rather than forcing every topic into one repeated layout.
     count=len(components)
+    illustration_hint=str(s.get("illustration") or "").lower()
+    if any(k in illustration_hint for k in ("vertical stack","stacked vertically","top-to-bottom")):
+        layout="vertical"
+    elif any(k in illustration_hint for k in ("horizontal","left-to-right","side-by-side")):
+        layout="horizontal"
+    elif any(k in illustration_hint for k in ("diagonal","process chain","flow path")):
+        layout="diagonal"
+    elif any(k in illustration_hint for k in ("grid","modular","array")):
+        layout="grid"
+    else:
+        layout=("horizontal","vertical","diagonal","grid")[si%4]
     for j,label in enumerate(components):
-        # Give every beat a different blocking pattern so the film does not
-        # repeat the same circular product arrangement in every scene.
         spread = j-(count-1)/2
-        if si % 4 == 0:
-            final=(spread*1.65,0.0,0.22+(j%2)*0.16)                 # horizontal reveal
-        elif si % 4 == 1:
-            final=(0.0,spread*1.30,0.22+(j%2)*0.16)                 # vertical exploded stack
-        elif si % 4 == 2:
-            final=(spread*1.35,spread*0.72,0.22+(j%2)*0.16)         # diagonal process chain
+        if layout=="horizontal":
+            final=(spread*1.65,0.0,0.22+(j%2)*0.16)
+        elif layout=="vertical":
+            final=(0.0,spread*1.30,0.22+(j%2)*0.16)
+        elif layout=="diagonal":
+            final=(spread*1.35,spread*0.72,0.22+(j%2)*0.16)
         else:
-            final=((j%2)*1.65-0.82,(j//2)*1.45-0.72,0.22+(j%2)*0.16) # modular cutaway grid
+            final=((j%2)*1.65-0.82,(j//2)*1.45-0.72,0.22+(j%2)*0.16)
         exploded=(final[0]*1.30,final[1]*1.30,final[2]+1.05)
         parts=build_component(label,exploded,ivory,accent)
         for part in parts:
@@ -296,6 +306,40 @@ for si,(s,start,end) in enumerate(groups):
             part.rotation_euler.z -= math.radians(12 if j%2 else -12)
             part.keyframe_insert("rotation_euler",frame=f1)
             created.append(part)
+        # Animate the primary physical subject according to the spoken action.
+        action=str(s.get("animation") or "").lower()
+        hero=parts[0] if parts else None
+        if hero:
+            if any(k in action for k in ("spin","rotate","revolve","turning","rotates")):
+                hero.keyframe_insert("rotation_euler",frame=f1)
+                hero.rotation_euler.z += math.radians(110)
+                hero.keyframe_insert("rotation_euler",frame=f2)
+            elif any(k in action for k in ("open","unfold","hinge","swing")):
+                hero.keyframe_insert("rotation_euler",frame=f1)
+                hero.rotation_euler.y += math.radians(38)
+                hero.keyframe_insert("rotation_euler",frame=f2)
+            elif any(k in action for k in ("slide","travel","move across","moves toward","transfers")):
+                hero.keyframe_insert("location",frame=f1)
+                hero.location.x += 0.62
+                hero.keyframe_insert("location",frame=f2)
+            elif any(k in action for k in ("expand","inflate","grow","enlarge")):
+                hero.keyframe_insert("scale",frame=f1)
+                hero.scale *= 1.16
+                hero.keyframe_insert("scale",frame=f2)
+            elif any(k in action for k in ("pulse","flash","illuminate","light up")):
+                hero.keyframe_insert("scale",frame=f1)
+                hero.scale *= 1.10
+                hero.keyframe_insert("scale",frame=f2)
+            elif any(k in action for k in ("explode","separate","disassemble","break apart")):
+                for part_index, part in enumerate(parts):
+                    part.keyframe_insert("location",frame=f1)
+                    part.location.z += 0.32 + 0.10 * (part_index % 3)
+                    part.location.x += (-1 if part_index % 2 else 1) * 0.18
+                    part.keyframe_insert("location",frame=f2)
+            else:
+                hero.keyframe_insert("location",frame=f1)
+                hero.location.z += 0.14
+                hero.keyframe_insert("location",frame=f2)
     # Show a moving signal only when the narration actually describes transfer or flow.
     story=(str(s.get("visual",""))+" "+str(s.get("voice",""))).lower()
     if any(k in story for k in ("flow","moves","transfer","travels","current","energy","power","water","light","signal","rotates")):
@@ -322,15 +366,26 @@ for si,(s,start,end) in enumerate(groups):
         obj.keyframe_insert("hide_render",frame=min(720,f2+1))
     # Reset and keyframe a distinct, purposeful camera path for every narration beat.
     mode=str(s.get("camera") or "macro push-in").lower()
+    camera_detail=str(s.get("cameraDetail") or "").lower()
     rig.rotation_euler=(0,0,0)
     rig.location=(0,0,0)
     rig.keyframe_insert("rotation_euler",frame=f0)
     rig.keyframe_insert("location",frame=f0)
-    cam.location=(0,-10,7)
+    if any(k in camera_detail for k in ("top-down","overhead","bird's-eye")):
+        cam.location=(0,-6,10)
+    elif any(k in camera_detail for k in ("low angle","worm's-eye")):
+        cam.location=(0,-11,4.2)
+    else:
+        cam.location=(0,-10,7)
     cam.rotation_euler=(Vector((0,0,0))-Vector(cam.location)).to_track_quat("-Z","Y").to_euler()
     cam.keyframe_insert("location",frame=f0)
     cam.keyframe_insert("rotation_euler",frame=f0)
-    cam.data.ortho_scale=12.0
+    if any(k in camera_detail for k in ("macro","tight close-up","extreme close")):
+        cam.data.ortho_scale=9.0
+    elif any(k in camera_detail for k in ("wide","full assembly","establishing")):
+        cam.data.ortho_scale=13.0
+    else:
+        cam.data.ortho_scale=12.0
     cam.data.keyframe_insert("ortho_scale",frame=f0)
     if "left-to-right" in mode:
         cam.location.x=-1.8
@@ -349,6 +404,9 @@ for si,(s,start,end) in enumerate(groups):
         rig.keyframe_insert("rotation_euler",frame=f2)
     elif "pull-back" in mode:
         cam.data.ortho_scale=14.0
+        cam.data.keyframe_insert("ortho_scale",frame=f2)
+    elif "macro push-in" in mode:
+        cam.data.ortho_scale=7.8
         cam.data.keyframe_insert("ortho_scale",frame=f2)
     else:
         cam.data.ortho_scale=10.0
