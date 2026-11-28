@@ -200,6 +200,39 @@ def build_component(label, center, material, accent):
         obj.rotation_euler.y=math.radians(90); made.append(obj)
         if "valve" in kind:
             made.append(torus("Valve handwheel",(x,y,z+0.25),0.32,0.055,accent))
+    elif any(k in kind for k in ("silicon wafer","silicon cell","semiconductor","photovoltaic cell","solar cell","microchip","processor","circuit board","pcb")):
+        board=cube(name,center,(1.15,0.82,0.10),dark,0.025); made.append(board)
+        for row in range(3):
+            for col in range(4):
+                chip=cube("Semiconductor element",(x-0.39+col*0.26,y-0.25+row*0.24,z+0.075),(0.17,0.14,0.035),accent,0.008)
+                made.append(chip)
+        for n in range(5):
+            made.append(cube("Copper trace",(x-0.48+n*0.24,y+0.39,z+0.065),(0.035,0.12,0.025),silver,0.004))
+    elif any(k in kind for k in ("battery","cell pack","lithium cell","accumulator")):
+        made.append(cube(name,center,(1.05,0.78,0.62),dark,0.07))
+        for n in range(4):
+            made.append(cyl("Battery cell",(x-0.34+n*0.22,y,z+0.34),0.095,0.55,accent,24))
+        made.append(cube("Positive terminal",(x-0.34,y,z+0.67),(0.12,0.12,0.08),silver,0.01))
+        made.append(cube("Negative terminal",(x+0.34,y,z+0.67),(0.12,0.12,0.08),silver,0.01))
+    elif any(k in kind for k in ("light bulb","lamp","led","light","bulb")):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=20, radius=0.34, location=(x,y,z+0.30))
+        bulb=bpy.context.object; bulb.name=name; bulb.scale=(0.78,0.78,1.0); bulb.data.materials.append(accent); made.append(bulb)
+        made.append(cyl("Lamp socket",(x,y,z-0.08),0.19,0.22,silver,32))
+        made.append(torus("Socket thread",(x,y,z-0.12),0.18,0.025,dark))
+    elif any(k in kind for k in ("fan","propeller","impeller")):
+        made.append(cyl(name,center,0.22,0.22,silver,32))
+        for n in range(5):
+            blade=cube("Fan blade",(x+math.cos(math.tau*n/5)*0.38,y+math.sin(math.tau*n/5)*0.38,z),(0.62,0.14,0.055),accent,0.025)
+            blade.rotation_euler.z=math.tau*n/5; made.append(blade)
+    elif any(k in kind for k in ("screen","monitor","display","television")):
+        made.append(cube(name,center,(1.25,0.10,0.78),dark,0.055))
+        made.append(cube("Illuminated display",(x,y-0.058,z),(1.12,0.018,0.64),accents[1],0.015))
+        made.append(cyl("Display stand",(x,y,z-0.52),0.10,0.28,silver,24))
+    elif any(k in kind for k in ("switch","breaker","fuse","relay","toggle")):
+        made.append(cube(name,center,(0.72,0.58,0.48),dark,0.055))
+        lever=cube("Switch lever",(x,y-0.34,z+0.24),(0.12,0.10,0.42),accent,0.025)
+        lever.rotation_euler.y=math.radians(-24); made.append(lever)
+        made.append(cube("Contact terminals",(x,y+0.34,z),(0.48,0.10,0.12),silver,0.018))
     elif any(k in kind for k in ("bearing","seal","ring","race")):
         made.append(cyl(name,center,0.48,0.18,dark,64))
         made.append(torus("Bearing race",(x,y,z+0.12),0.34,0.09,silver))
@@ -287,18 +320,38 @@ for si,(s,start,end) in enumerate(groups):
         obj.keyframe_insert("hide_render",frame=max(f0,f2-1))
         obj.hide_render=True
         obj.keyframe_insert("hide_render",frame=min(720,f2+1))
-    mode=str(s.get("camera") or "slow push-in").lower()
+    # Reset and keyframe a distinct, purposeful camera path for every narration beat.
+    mode=str(s.get("camera") or "macro push-in").lower()
     rig.rotation_euler=(0,0,0)
+    rig.location=(0,0,0)
     rig.keyframe_insert("rotation_euler",frame=f0)
-    if "orbit" in mode or "rotate" in mode:
-        rig.rotation_euler.z=math.radians(8)
+    rig.keyframe_insert("location",frame=f0)
+    cam.location=(0,-10,7)
+    cam.rotation_euler=(Vector((0,0,0))-Vector(cam.location)).to_track_quat("-Z","Y").to_euler()
+    cam.keyframe_insert("location",frame=f0)
+    cam.keyframe_insert("rotation_euler",frame=f0)
+    cam.data.ortho_scale=12.0
+    cam.data.keyframe_insert("ortho_scale",frame=f0)
+    if "left-to-right" in mode:
+        cam.location.x=-1.8
+        cam.keyframe_insert("location",frame=f2)
+    elif "right-to-left" in mode:
+        cam.location.x=1.8
+        cam.keyframe_insert("location",frame=f2)
+    elif "top-down" in mode:
+        cam.location=(0,-7,10)
+        cam.rotation_euler=(Vector((0,0,0))-Vector(cam.location)).to_track_quat("-Z","Y").to_euler()
+        cam.keyframe_insert("location",frame=f2)
+        cam.keyframe_insert("rotation_euler",frame=f2)
+    elif "orbit clockwise" in mode or "orbit counterclockwise" in mode:
+        direction=1 if "clockwise" in mode else -1
+        rig.rotation_euler.z=math.radians(14*direction)
         rig.keyframe_insert("rotation_euler",frame=f2)
+    elif "pull-back" in mode:
+        cam.data.ortho_scale=14.0
+        cam.data.keyframe_insert("ortho_scale",frame=f2)
     else:
-        rig.rotation_euler.z=0
-        rig.keyframe_insert("rotation_euler",frame=f2)
-        cam.data.ortho_scale=11.5
-        cam.data.keyframe_insert("ortho_scale",frame=f0)
-        cam.data.ortho_scale=10.6
+        cam.data.ortho_scale=10.0
         cam.data.keyframe_insert("ortho_scale",frame=f2)
     scene.frame_set(f0)
 
