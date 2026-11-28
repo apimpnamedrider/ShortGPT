@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import time
 import threading
+import selectors
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -24,19 +25,57 @@ FONT_CANDIDATES = [
 
 
 def _run(command, timeout=900):
-    completed = subprocess.run(
-        command,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=timeout,
+    """Run a media command while streaming output and render progress into job state."""
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1, errors="replace"
     )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "No FFmpeg diagnostic output").strip()
-        print(f"Render command failed (exit {completed.returncode}): {detail[-6000:]}")
+    output = []
+    deadline = time.monotonic() + timeout
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    try:
+        while True:
+            if time.monotonic() >= deadline:
+                process.kill()
+                process.wait()
+                raise RuntimeError(f"Render command timed out after {timeout} seconds.")
+            events = selector.select(timeout=1.0)
+            if events:
+                line = process.stdout.readline()
+                if line:
+                    output.append(line)
+                    if len(output) > 3000:
+                        output = output[-2000:]
+                    match = re.search(r"FERN_PROGRESS\\s+(\\d+)\\s+(\\d+)", line)
+                    job_id = getattr(_JOB_CONTEXT, "job_id", None)
+                    if match and job_id:
+                        current, total = int(match.group(1)), max(1, int(match.group(2)))
+                        with _RENDER_JOBS_LOCK:
+                            job = _RENDER_JOBS.get(job_id)
+                            if job:
+                                job["progress"] = min(85, 10 + int(75 * current / total))
+                                job["stage"] = f"Rendering 3D frames ({current}/{total})"
+                                job["updatedAt"] = time.time()
+                    elif line.strip():
+                        print(line.rstrip()[-1200:], flush=True)
+            elif process.poll() is not None:
+                # Drain any final buffered output before exiting.
+                remainder = process.stdout.read()
+                if remainder:
+                    output.append(remainder)
+                break
+        return_code = process.wait()
+    finally:
+        selector.close()
+        if process.stdout:
+            process.stdout.close()
+    combined = "".join(output)
+    if return_code != 0:
+        detail = combined.strip() or "No media diagnostic output"
+        print(f"Render command failed (exit {return_code}): {detail[-6000:]}", flush=True)
         raise RuntimeError(f"Render command failed: {detail[-1200:]}")
-    return completed.stdout.strip()
+    return combined.strip()
 
 
 def _validate_mp4(path):
@@ -167,14 +206,16 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     if not blender_script.is_file():
         raise RuntimeError("The Fern 3D scene builder is missing from the worker deployment.")
 
-    print(f"Starting Blender 3D render: {len(clean_scenes)} scenes, 12 fps, 9:16.")
+    _set_job_stage("Starting CPU-based 3D render", 10)
+    print(f"Starting Blender CPU Cycles 3D render: {len(clean_scenes)} scenes, 8 fps, 450x800.")
     _run([
-        blender, "-b", "--python", str(blender_script), "--",
+        blender, "-b", "--threads", "4", "--python", str(blender_script), "--",
         str(storyboard_path), str(silent_path),
     ], timeout=3600)
     if not silent_path.is_file() or silent_path.stat().st_size < 10000:
         raise RuntimeError("Blender completed without producing its 3D scene video.")
 
+    _set_job_stage("Encoding vertical MP4", 88)
     _run([
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(silent_path), "-i", str(audio_path),
@@ -184,12 +225,25 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
         "-threads", "2", "-crf", "19", "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart", str(output_path),
     ], timeout=900)
+    _set_job_stage("Validating finished MP4", 98)
     _validate_mp4(output_path)
     return output_path
 
 
 _RENDER_JOBS = {}
 _RENDER_JOBS_LOCK = threading.Lock()
+_JOB_CONTEXT = threading.local()
+
+
+def _set_job_stage(stage, progress):
+    job_id = getattr(_JOB_CONTEXT, "job_id", None)
+    if not job_id:
+        return
+    with _RENDER_JOBS_LOCK:
+        job = _RENDER_JOBS.get(job_id)
+        if job:
+            job.update({"stage": stage, "progress": max(job.get("progress", 0), progress),
+                        "updatedAt": time.time()})
 
 
 def start_render_job(topic, language, token, storyboard_json):
@@ -197,25 +251,35 @@ def start_render_job(topic, language, token, storyboard_json):
     job_id = uuid.uuid4().hex
     with _RENDER_JOBS_LOCK:
         _RENDER_JOBS[job_id] = {
-            "status": "queued", "progress": 0, "videoUrl": None, "error": None,
-            "createdAt": time.time()
+            "status": "queued", "progress": 0, "stage": "Queued",
+            "videoUrl": None, "error": None, "createdAt": time.time(),
+            "updatedAt": time.time()
         }
 
     def run():
+        _JOB_CONTEXT.job_id = job_id
         with _RENDER_JOBS_LOCK:
-            _RENDER_JOBS[job_id]["status"] = "rendering"
+            _RENDER_JOBS[job_id].update({"status": "rendering", "stage": "Preparing storyboard",
+                                         "progress": 3, "updatedAt": time.time()})
         try:
             video_url = render_video(topic, language, token, storyboard_json)
             with _RENDER_JOBS_LOCK:
                 _RENDER_JOBS[job_id].update({
-                    "status": "completed", "progress": 100, "videoUrl": video_url
+                    "status": "completed", "progress": 100, "stage": "Complete",
+                    "videoUrl": video_url, "updatedAt": time.time()
                 })
         except Exception as exc:
             print(f"Render job {job_id} failed: {type(exc).__name__}: {exc}")
             with _RENDER_JOBS_LOCK:
                 _RENDER_JOBS[job_id].update({
-                    "status": "failed", "error": str(exc)[:1000]
+                    "status": "failed", "stage": "Failed",
+                    "error": str(exc)[:1000], "updatedAt": time.time()
                 })
+        finally:
+            try:
+                del _JOB_CONTEXT.job_id
+            except AttributeError:
+                pass
 
     thread = threading.Thread(target=run, name=f"render-{job_id[:8]}", daemon=True)
     thread.start()
