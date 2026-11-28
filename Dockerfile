@@ -1,9 +1,15 @@
 # Use a maintained Debian-based Python image.
 FROM python:3.10-slim-bookworm
 
-# Install FFmpeg without recommended extras and remove apt metadata.
+# Blender Workbench needs a headless-capable EGL/OpenGL stack even in background mode.
+# Keep the Mesa software renderer so the worker does not require a GPU.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core blender \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg fonts-dejavu-core blender \
+        libegl1 libegl-mesa0 libgl1 libgl1-mesa-dri libglx0 libgbm1 \
+        libx11-6 libxext6 libxrender1 libxi6 libxfixes3 libxkbcommon0 \
+        libsm6 libxrandr2 libxinerama1 \
+    && blender --background --factory-startup --python-expr "import bpy; s=bpy.context.scene; s.render.engine='BLENDER_WORKBENCH'; s.render.resolution_x=32; s.render.resolution_y=32; bpy.ops.render.render(write_still=False); print('BLENDER_WORKBENCH_RUNTIME_OK', bpy.app.version_string)" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
