@@ -127,8 +127,8 @@ def _cleanup_old_outputs():
             (p for p in VIDEO_DIR.glob("shorts-forge-*.mp4") if p.is_file()),
             key=lambda p: p.stat().st_mtime,
         )
-        # Retain the two newest completed previews; remove older ones only when space is tight.
-        while usage.free < 220 * 1024 * 1024 and len(completed) > 2:
+        # Retain the newest completed preview; older confirmed downloads can be removed when space is tight.
+        while usage.free < 220 * 1024 * 1024 and len(completed) > 1:
             oldest = completed.pop(0)
             try:
                 oldest.unlink(missing_ok=True)
