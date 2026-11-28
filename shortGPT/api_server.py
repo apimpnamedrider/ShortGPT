@@ -214,7 +214,7 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     _set_job_stage("Starting CPU-based 3D render", 10)
     print(f"Starting Blender CPU Cycles 3D render: {len(clean_scenes)} narration-timed shots, 8 fps, 900x1600.")
     _run([
-        blender, "-b", "--threads", "2", "--python", str(blender_script), "--",
+        blender, "-b", "--threads", "1", "--python", str(blender_script), "--",
         str(storyboard_path), str(silent_path),
     ], timeout=3600)
     if not silent_path.is_file() or silent_path.stat().st_size < 10000:
