@@ -43,7 +43,7 @@ def _json_request(url, api_key, payload=None, method=None, timeout=60):
 
 
 def _upload_media(path, api_key, content_type):
-    ticket = _json_request(API_BASE + "/v1/upload", api_key, payload={})
+    ticket = _json_request(API_BASE + "/v1/upload", api_key, method="POST")
     upload_url = ticket.get("upload_url")
     storage_uri = ticket.get("storage_uri")
     if not upload_url or not storage_uri:
