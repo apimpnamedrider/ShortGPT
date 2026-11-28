@@ -41,7 +41,8 @@ async def render_job_status(job_id: str):
 
 
 @app.get("/gradio_api/file={file_path:path}")
-async def download_rendered_video(file_path: str):
+@app.head("/gradio_api/file={file_path:path}")
+async def download_rendered_video(file_path: str, request: Request):
     # Preserve the existing download URL shape while restricting reads to rendered videos.
     candidate = Path("/" + file_path.lstrip("/")).resolve()
     video_root = VIDEO_DIR.resolve()
@@ -49,10 +50,13 @@ async def download_rendered_video(file_path: str):
         raise HTTPException(status_code=404, detail="Video file not found.")
     if not candidate.is_file() or candidate.suffix.lower() != ".mp4":
         raise HTTPException(status_code=404, detail="Video file not found.")
+    download = request.query_params.get("download") == "1"
     return FileResponse(
         str(candidate),
         media_type="video/mp4",
         filename=candidate.name,
+        content_disposition_type="attachment" if download else "inline",
+        headers={"Cache-Control": "private, no-store", "Accept-Ranges": "bytes"},
     )
 
 
