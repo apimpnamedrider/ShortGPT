@@ -49,7 +49,7 @@ def _run(command, timeout=900):
                     output.append(line)
                     if len(output) > 3000:
                         output = output[-2000:]
-                    match = re.search(r"FERN_PROGRESS\s+(\d+)\s+(\d+)", line)
+                    match = re.search(r"(?:MECHCGI|FERN)_PROGRESS\s+(\d+)\s+(\d+)", line)
                     job_id = getattr(_JOB_CONTEXT, "job_id", None)
                     if match and job_id:
                         current, total = int(match.group(1)), max(1, int(match.group(2)))
@@ -235,7 +235,7 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
 
     work_dir.mkdir(parents=True, exist_ok=True)
     output_path = VIDEO_DIR / f"shorts-forge-{uuid.uuid4().hex}.mp4"
-    silent_path = work_dir / "fern-scenes.mp4"
+    silent_path = work_dir / "mechanical-cgi-scenes.mp4"
     storyboard_path = work_dir / "storyboard.json"
     audio_path = work_dir / "narration.mp3"
 
@@ -308,12 +308,12 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     blender = shutil.which("blender")
     if not blender:
         raise RuntimeError("The Blender 3D engine is not installed on this worker.")
-    blender_script = Path(__file__).with_name("fern_blender_render.py")
+    blender_script = Path(__file__).with_name("mechanical_cgi_render.py")
     if not blender_script.is_file():
-        raise RuntimeError("The Fern 3D scene builder is missing from the worker deployment.")
+        raise RuntimeError("The mechanical CGI Blender scene builder is missing from the worker deployment.")
 
-    _set_job_stage("Starting CPU-based 3D render", 10)
-    print(f"Starting Blender CPU Cycles 3D render: {len(clean_scenes)} narration-timed shots, 8 fps, 900x1600.")
+    _set_job_stage("Starting mechanical CGI 3D render", 10)
+    print(f"Starting mechanical CGI Blender render: {len(clean_scenes)} narration-timed shots, 8 fps, 540x960.")
     _run([
         blender, "-b", "--threads", "1", "--python", str(blender_script), "--",
         str(storyboard_path), str(silent_path),
