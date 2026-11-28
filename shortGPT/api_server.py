@@ -246,7 +246,7 @@ def _set_job_stage(stage, progress):
                         "updatedAt": time.time()})
 
 
-def start_render_job(topic, language, token, storyboard_json, ltx_api_key):
+def start_render_job(topic, language, token, storyboard_json):
     """Queue a render on a daemon thread and return immediately."""
     job_id = uuid.uuid4().hex
     with _RENDER_JOBS_LOCK:
@@ -267,7 +267,7 @@ def start_render_job(topic, language, token, storyboard_json, ltx_api_key):
                 with _RENDER_JOBS_LOCK:
                     _RENDER_JOBS[job_id].update({"status": "rendering", "stage": "Preparing storyboard",
                                                  "progress": 3, "updatedAt": time.time()})
-                video_url = render_video(topic, language, token, storyboard_json, ltx_api_key)
+                video_url = render_video(topic, language, token, storyboard_json)
             with _RENDER_JOBS_LOCK:
                 _RENDER_JOBS[job_id].update({
                     "status": "completed", "progress": 100, "stage": "Complete",
@@ -316,7 +316,7 @@ def _write_captions(scenes, path):
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def render_video(topic: str, language: str, token: str, storyboard_json: str = "", ltx_api_key: str = "") -> str:
+def render_video(topic: str, language: str, token: str, storyboard_json: str = "") -> str:
     """Render a 60-second mechanical CGI Short locally, with no paid generation API."""
     expected_token = os.environ.get("SHORTGPT_API_TOKEN", "")
     if not expected_token or not hmac.compare_digest(str(token or ""), expected_token):
