@@ -1,6 +1,6 @@
 """LTX-powered generative video engine for Shorts Forge.
 
-Creates ten narration-conditioned 6-second clips, carries the final frame forward
+Creates ten narration-matched 6-second clips, carries the final frame forward
 between clips for visual continuity, then assembles a 60-second 9:16 master.
 """
 import asyncio
@@ -81,11 +81,11 @@ def _probe_duration(path):
     return float(value)
 
 
-def _poll_generation(job_id, api_key, progress, index):
+def _poll_generation(endpoint, job_id, api_key, progress, index):
     deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
         status = _json_request(
-            API_BASE + "/v2/audio-to-video/" + job_id,
+            API_BASE + endpoint + "/" + job_id,
             api_key,
             method="GET",
             timeout=45,
@@ -184,24 +184,27 @@ def render_ltx_video(topic, language, work_dir, output_path, storyboard, api_key
             raise RuntimeError("Narration segment {} could not be fitted to six seconds.".format(index + 1))
         voice_files.append(fitted_audio)
 
-        audio_uri = _upload_media(fitted_audio, api_key, "audio/mpeg")
         prompt = _scene_prompt(topic, title, scene, index)
         request_body = {
-            "audio_uri": audio_uri,
             "prompt": prompt,
             "resolution": "1080x1920",
+            "duration": CLIP_SECONDS,
             "model": MODEL,
             "guidance_scale": 8.0,
         }
+        # First shot is generated from text; later shots use the previous final frame
+        # as an image reference so the machine and material identity stay coherent.
+        endpoint = "/v2/text-to-video"
         if previous_frame_uri:
             request_body["image_uri"] = previous_frame_uri
-        submitted = _json_request(API_BASE + "/v2/audio-to-video", api_key, payload=request_body)
+            endpoint = "/v2/image-to-video"
+        submitted = _json_request(API_BASE + endpoint, api_key, payload=request_body)
         job_id = str(submitted.get("id") or "")
         if not job_id:
             raise RuntimeError("LTX did not return a generation job ID for scene {}.".format(index + 1))
         if progress:
             progress(index + 1, CLIP_COUNT, "Submitted cinematic AI clip {}/{}".format(index + 1, CLIP_COUNT))
-        video_url = _poll_generation(job_id, api_key, progress, index)
+        video_url = _poll_generation(endpoint, job_id, api_key, progress, index)
         raw_clip = work_dir / "ltx-clip-{:02d}.mp4".format(index + 1)
         normalized = work_dir / "clip-{:02d}-1080x1920.mp4".format(index + 1)
         _download(video_url, raw_clip)
