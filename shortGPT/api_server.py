@@ -97,8 +97,10 @@ def _validate_mp4(path):
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1", str(path),
     ], timeout=30))
-    if duration < 5:
-        raise RuntimeError("The rendered MP4 is too short to be a usable video.")
+    if duration < 59.5 or duration > 60.5:
+        raise RuntimeError(
+            "The final MP4 must be exactly 60 seconds; the validated file is {:.2f} seconds.".format(duration)
+        )
     return {"duration": round(duration, 2), "bytes": path.stat().st_size, "probe": probe}
 
 
