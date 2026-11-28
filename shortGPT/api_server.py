@@ -8,6 +8,7 @@ import subprocess
 import time
 import threading
 import selectors
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -254,92 +255,8 @@ def _parse_scene_time(value, fallback_start, fallback_end):
     return start, end
 
 
-def _scene_driven_render(topic, language, work_dir, storyboard_json, ltx_api_key):
-    """Compatibility wrapper: all production video now goes through LTX AI generation."""
-    storyboard = json.loads(storyboard_json)
-    selected_voice = "en-ZA-LukeNeural"
-    try:
-        selected_voice = EDGE_TTS_VOICENAME_MAPPING[Language(language)]["male"]
-    except Exception:
-        pass
-    return render_ltx_video(
-        topic, language, work_dir,
-        VIDEO_DIR / ("shorts-forge-" + uuid.uuid4().hex + ".mp4"),
-        storyboard, ltx_api_key, selected_voice, _make_voice,
-        lambda current, total, stage: _set_job_stage(stage, 10 + int(75 * current / max(1, total)))
-    )
-
-
-_RENDER_JOBS = {}
-_RENDER_JOBS_LOCK = threading.Lock()
-_JOB_CONTEXT = threading.local()
-_RENDER_SEMAPHORE = threading.Semaphore(1)
-
-
-def _set_job_stage(stage, progress):
-    job_id = getattr(_JOB_CONTEXT, "job_id", None)
-    if not job_id:
-        return
-    with _RENDER_JOBS_LOCK:
-        job = _RENDER_JOBS.get(job_id)
-        if job:
-            job.update({"stage": stage, "progress": max(job.get("progress", 0), progress),
-                        "updatedAt": time.time()})
-
-
-def start_render_job(topic, language, token, storyboard_json, ltx_api_key):
-    """Queue a render on a daemon thread and return immediately."""
-    job_id = uuid.uuid4().hex
-    with _RENDER_JOBS_LOCK:
-        _RENDER_JOBS[job_id] = {
-            "status": "queued", "progress": 0, "stage": "Queued",
-            "videoUrl": None, "error": None, "createdAt": time.time(),
-            "updatedAt": time.time()
-        }
-
-    def run():
-        _JOB_CONTEXT.job_id = job_id
-        try:
-            with _RENDER_JOBS_LOCK:
-                _RENDER_JOBS[job_id].update({"status": "queued", "stage": "Waiting for render slot",
-                                             "progress": 1, "updatedAt": time.time()})
-            # One Blender process at a time: this 1 GB worker cannot safely render concurrently.
-            with _RENDER_SEMAPHORE:
-                with _RENDER_JOBS_LOCK:
-                    _RENDER_JOBS[job_id].update({"status": "rendering", "stage": "Preparing storyboard",
-                                                 "progress": 3, "updatedAt": time.time()})
-                video_url = render_video(topic, language, token, storyboard_json, ltx_api_key)
-            with _RENDER_JOBS_LOCK:
-                _RENDER_JOBS[job_id].update({
-                    "status": "completed", "progress": 100, "stage": "Complete",
-                    "videoUrl": video_url, "updatedAt": time.time()
-                })
-        except Exception as exc:
-            print(f"Render job {job_id} failed: {type(exc).__name__}: {exc}", flush=True)
-            with _RENDER_JOBS_LOCK:
-                _RENDER_JOBS[job_id].update({
-                    "status": "failed", "stage": "Failed",
-                    "error": str(exc)[:1000], "updatedAt": time.time()
-                })
-        finally:
-            try:
-                del _JOB_CONTEXT.job_id
-            except AttributeError:
-                pass
-
-    thread = threading.Thread(target=run, name=f"render-{job_id[:8]}", daemon=True)
-    thread.start()
-    return job_id
-
-
-def get_render_job(job_id):
-    with _RENDER_JOBS_LOCK:
-        job = _RENDER_JOBS.get(job_id)
-        return dict(job) if job else None
-
-
 def render_video(topic: str, language: str, token: str, storyboard_json: str = "", ltx_api_key: str = "") -> str:
-    """Render a vertical MP4 and return a Gradio-downloadable URL."""
+    """Generate an AI video; keep only the finished MP4 on the persistent Railway volume."""
     expected_token = os.environ.get("SHORTGPT_API_TOKEN", "")
     if not expected_token or not hmac.compare_digest(str(token or ""), expected_token):
         raise ValueError("Invalid worker token.")
@@ -347,13 +264,6 @@ def render_video(topic: str, language: str, token: str, storyboard_json: str = "
     topic = (topic or "").strip()
     if not topic or len(topic) > 600:
         raise ValueError("Enter a topic between 1 and 600 characters.")
-
-    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-    _cleanup_old_outputs()
-    work_dir = VIDEO_DIR / f"job-{uuid.uuid4().hex}"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    output_path = None
-
     if not storyboard_json:
         raise ValueError("A scene-by-scene storyboard is required. Generate a script before rendering.")
     if not ltx_api_key or not ltx_api_key.strip():
@@ -365,27 +275,42 @@ def render_video(topic: str, language: str, token: str, storyboard_json: str = "
     scenes = storyboard.get("scenes") if isinstance(storyboard, dict) else None
     if not isinstance(scenes, list) or len(scenes) != 10:
         raise ValueError("Generate exactly ten narration-matched scenes before rendering.")
+
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_outputs()
+    output_path = VIDEO_DIR / ("shorts-forge-" + uuid.uuid4().hex + ".mp4")
+    # Raw clips, continuity frames and narration are temporary. Only the final MP4
+    # is retained on the small persistent Railway volume.
+    work_dir = Path(tempfile.mkdtemp(prefix="shortsforge-job-"))
     selected_voice = "en-ZA-LukeNeural"
     try:
-        selected_language = Language(language)
-        selected_voice = EDGE_TTS_VOICENAME_MAPPING[selected_language]["male"]
-    except Exception:
-        pass
-    output_path = render_ltx_video(
-        topic=topic,
-        language=language,
-        work_dir=work_dir,
-        output_path=VIDEO_DIR / ("shorts-forge-" + uuid.uuid4().hex + ".mp4"),
-        storyboard=storyboard,
-        api_key=ltx_api_key,
-        voice_name=selected_voice,
-        voice_generator=_make_voice,
-        progress=lambda current, total, stage: _set_job_stage(stage, 10 + int(75 * current / max(1, total))),
-    )
+        try:
+            selected_language = Language(language)
+            selected_voice = EDGE_TTS_VOICENAME_MAPPING[selected_language]["male"]
+        except Exception:
+            pass
 
-    _validate_mp4(output_path)
-    shutil.rmtree(work_dir, ignore_errors=True)
-    public_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
-    if not public_domain:
-        raise RuntimeError("Railway public domain is not configured.")
-    return "https://" + public_domain + "/gradio_api/file=" + quote(str(output_path), safe="/")
+        render_ltx_video(
+            topic=topic,
+            language=language,
+            work_dir=work_dir,
+            output_path=output_path,
+            storyboard=storyboard,
+            api_key=ltx_api_key,
+            voice_name=selected_voice,
+            voice_generator=_make_voice,
+            progress=lambda current, total, stage: _set_job_stage(
+                stage, 10 + int(75 * current / max(1, total))
+            ),
+        )
+        _validate_mp4(output_path)
+        public_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+        if not public_domain:
+            raise RuntimeError("Railway public domain is not configured.")
+        return "https://" + public_domain + "/gradio_api/file=" + quote(str(output_path), safe="/")
+    except Exception:
+        if output_path.exists():
+            output_path.unlink(missing_ok=True)
+        raise
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
