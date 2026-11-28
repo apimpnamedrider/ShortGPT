@@ -162,7 +162,7 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
             )
         if not voice_line or not visual_line:
             raise ValueError(f"Scene {index + 1} is missing narration or visual direction.")
-        words = len(re.findall(r"\\b[\\w’'-]+\\b", voice_line))
+        words = len(re.findall(r"\b[\w’'-]+\b", voice_line))
         if words > 22:
             raise ValueError(
                 f"Scene {index + 1} contains {words} spoken words. Split it into shorter narration-matched shots."
