@@ -18,7 +18,7 @@ jobs:
       - name: Submit one-time render through the deployed app backend
         id: submit
         env:
-          SMOKE_URL: https://shorts-forge-x24epq.v2.appdeploy.ai/api/_render-smoke/smoke-20261128-01-8d3f6a9c2e7b41d5a0c8f2e6b3d9a751
+          SMOKE_URL: https://api-v2.appdeploy.ai/app/shorts-forge-x24epq/api/_render-smoke/smoke-20261128-01-8d3f6a9c2e7b41d5a0c8f2e6b3d9a751
         run: |
           set -euo pipefail
           response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 --max-time 40 "$SMOKE_URL")"
@@ -37,7 +37,7 @@ jobs:
           JOB_ID: ${{ steps.submit.outputs.job_id }}
         run: |
           set -euo pipefail
-          status_url="https://shorts-forge-x24epq.v2.appdeploy.ai/api/render-jobs/$JOB_ID"
+          status_url="https://api-v2.appdeploy.ai/app/shorts-forge-x24epq/api/render-jobs/$JOB_ID"
           deadline=$((SECONDS + 2100))
           completed=false
           while (( SECONDS < deadline )); do
@@ -80,7 +80,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
-          download_url="https://shorts-forge-x24epq.v2.appdeploy.ai/api/render-download/$JOB_ID"
+          download_url="https://api-v2.appdeploy.ai/app/shorts-forge-x24epq/api/render-download/$JOB_ID"
           curl --fail --location --silent --show-error --retry 2 --retry-delay 2 --max-time 360 "$download_url" -o /tmp/shorts-forge-smoke.mp4
           test -s /tmp/shorts-forge-smoke.mp4
           probe="$(ffprobe -v error -show_entries format=duration,size:stream=codec_type,codec_name,width,height -of json /tmp/shorts-forge-smoke.mp4)"
