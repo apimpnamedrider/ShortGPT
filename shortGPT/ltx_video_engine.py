@@ -282,7 +282,7 @@ def render_ltx_video(topic, language, work_dir, output_path, storyboard, api_key
             "-i", str(ambient_list), "-c:a", "aac", "-b:a", "96k", str(ambient_master)
         ], timeout=120)
 
-    subtitle_filter = "subtitles={}:force_style='FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=2,Shadow=0,Alignment=2,MarginV=120'".format(str(srt))
+    subtitle_filter = "subtitles={}:force_style='FontName=DejaVu Sans,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=150'".format(str(srt))
     if has_ambience:
         audio_filter = "[1:a]volume=1.0[vo];[2:a]volume=0.14[fx];[vo][fx]amix=inputs=2:duration=first:dropout_transition=2[a]"
         audio_inputs = ["-i", str(narration_master), "-i", str(ambient_master)]
