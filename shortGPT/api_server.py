@@ -112,9 +112,100 @@ def _cleanup_old_outputs():
             print(f"Output cleanup skipped for {item.name}: {exc}")
 
 
-async def _make_voice(text, voice, audio_path):
-    communicate = edge_tts.Communicate(text=text, voice=voice, rate="+0%")
-    await communicate.save(str(audio_path))
+def _voice_candidates(language, preferred_voice):
+    candidates = [preferred_voice]
+    try:
+        selected = Language(language)
+        mapping = EDGE_TTS_VOICENAME_MAPPING.get(selected, {})
+        candidates.extend([mapping.get("female"), mapping.get("male")])
+    except Exception:
+        pass
+    # Use separate regional voices as fallbacks for the common English selection.
+    if str(language).lower() == "english":
+        candidates.extend([
+            "en-ZA-LukeNeural",
+            "en-ZA-LeahNeural",
+            "en-AU-WilliamNeural",
+            "en-US-GuyNeural",
+            "en-GB-RyanNeural",
+        ])
+    unique = []
+    for item in candidates:
+        if item and item not in unique:
+            unique.append(item)
+    return unique
+
+
+def _local_voice_for(language):
+    code = {
+        "English": "en-za",
+        "Afrikaans": "af",
+        "Zulu": "zu",
+    }.get(str(language), "en")
+    try:
+        available = subprocess.run(
+            ["espeak-ng", "--voices"], capture_output=True, text=True,
+            timeout=10, check=True
+        ).stdout
+        matches = []
+        for line in available.splitlines():
+            fields = line.split()
+            if len(fields) >= 4 and fields[1].lower().startswith(code):
+                matches.append(fields[3])
+        if matches:
+            return matches[0]
+    except Exception:
+        pass
+    if code == "en-za":
+        return "en"
+    return None
+
+
+async def _make_voice(text, voice, audio_path, language="English"):
+    """Generate speech with retrying cloud voices and a local offline safety net."""
+    failures = []
+    for attempt, candidate in enumerate(_voice_candidates(language, voice), start=1):
+        try:
+            audio_path.unlink(missing_ok=True)
+            communicate = edge_tts.Communicate(text=text, voice=candidate, rate="+0%")
+            await asyncio.wait_for(communicate.save(str(audio_path)), timeout=90)
+            if audio_path.is_file() and audio_path.stat().st_size >= 1000:
+                print(f"Narration generated with Edge TTS voice {candidate}.", flush=True)
+                return
+            raise RuntimeError("The selected voice returned an empty audio file.")
+        except Exception as exc:
+            failures.append(f"{candidate}: {type(exc).__name__}: {exc}")
+            audio_path.unlink(missing_ok=True)
+            print(f"Edge TTS attempt {attempt} failed for {candidate}: {type(exc).__name__}", flush=True)
+            await asyncio.sleep(min(2 * attempt, 6))
+
+    local_voice = _local_voice_for(language)
+    if local_voice:
+        wav_path = audio_path.with_suffix(".wav")
+        try:
+            wav_path.unlink(missing_ok=True)
+            subprocess.run(
+                ["espeak-ng", "-v", local_voice, "-s", "150", "-w", str(wav_path), text],
+                capture_output=True, text=True, timeout=120, check=True
+            )
+            if not wav_path.is_file() or wav_path.stat().st_size < 1000:
+                raise RuntimeError("Offline speech engine produced an empty WAV.")
+            subprocess.run(
+                ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i",
+                 str(wav_path), "-codec:a", "libmp3lame", "-q:a", "4", str(audio_path)],
+                capture_output=True, text=True, timeout=120, check=True
+            )
+            wav_path.unlink(missing_ok=True)
+            if audio_path.is_file() and audio_path.stat().st_size >= 1000:
+                print(f"Narration generated with offline espeak-ng voice {local_voice}.", flush=True)
+                return
+        except Exception as exc:
+            wav_path.unlink(missing_ok=True)
+            failures.append(f"offline {local_voice}: {type(exc).__name__}: {exc}")
+    raise RuntimeError(
+        "Narration generation failed after cloud retries and offline fallback. "
+        + " | ".join(failures[-6:])[-1200:]
+    )
 
 
 def _parse_scene_time(value, fallback_start, fallback_end):
@@ -206,7 +297,7 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
         voice = EDGE_TTS_VOICENAME_MAPPING[selected_language]["male"]
     except Exception:
         pass
-    asyncio.run(_make_voice(narration, voice, audio_path))
+    asyncio.run(_make_voice(narration, voice, audio_path, language))
     if not audio_path.is_file() or audio_path.stat().st_size < 1000:
         raise RuntimeError("Narration audio could not be generated; refusing to create a silent video.")
 
