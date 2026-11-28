@@ -14,13 +14,13 @@ bpy.ops.object.delete(use_global=False)
 scene=bpy.context.scene
 scene.render.engine="CYCLES"
 scene.cycles.device="CPU"
-scene.cycles.samples=4
+scene.cycles.samples=6
 # Headless Blender package has no available OpenImageDenoiser device.
 scene.cycles.use_denoising=False
 scene.render.threads_mode="FIXED"
 scene.render.threads=2
-scene.render.resolution_x=450
-scene.render.resolution_y=800
+scene.render.resolution_x=720
+scene.render.resolution_y=1280
 scene.render.resolution_percentage=100
 scene.render.fps=8
 scene.render.fps_base=1
@@ -163,96 +163,133 @@ for i in range(len(groups)-1):
     groups[i]=(groups[i][0],groups[i][1],groups[i+1][1])
 groups[-1]=(groups[-1][0],groups[-1][1],60.0)
 
+def build_component(label, center, material, accent):
+    """Build a recognisable physical form from the actual named storyboard part."""
+    name = str(label)[:34]
+    kind = name.lower()
+    x,y,z = center
+    made = []
+    if any(k in kind for k in ("solar panel","roof array","photovoltaic","panel","silicon cell","silicon wafer","glass cover","tempered glass","cell array")):
+        base = cube(name, center, (1.55,1.05,0.12), dark, 0.035); made.append(base)
+        for row in range(3):
+            for col in range(4):
+                px=x-0.56+col*0.37; py=y-0.36+row*0.36
+                cell=cube("Photovoltaic cell",(px,py,z+0.085),(0.31,0.29,0.035),accents[1],0.012)
+                made.append(cell)
+        made.append(cube("Panel aluminium frame",(x,y,z+0.12),(1.66,1.14,0.045),silver,0.025))
+    elif any(k in kind for k in ("gear","wheel","rotor","fan","turbine","flywheel")):
+        body=cyl(name,center,0.58,0.20,material,64); made.append(body)
+        made.append(torus("Machined gear rim",(x,y,z+0.12),0.48,0.065,silver))
+        for n in range(12):
+            a=math.tau*n/12
+            tooth=cube("Gear tooth",(x+math.cos(a)*0.57,y+math.sin(a)*0.57,z),(0.17,0.15,0.22),material,0.025)
+            tooth.rotation_euler.z=a; made.append(tooth)
+        made.append(cyl("Gear hub",center,0.19,0.27,accent,32))
+    elif any(k in kind for k in ("house","home","room","building","appliance","fridge","refrigerator")):
+        made.append(cube(name,(x,y,z+0.35),(1.15,0.9,0.75),material,0.04))
+        made.append(cube("Roof plane",(x,y,z+0.82),(1.35,1.02,0.16),accents[0],0.035))
+        made.append(cube("Front window",(x-0.18,y-0.46,z+0.43),(0.32,0.035,0.27),glass,0.01))
+        made.append(cube("Door",(x+0.32,y-0.47,z+0.27),(0.22,0.04,0.52),dark,0.015))
+    elif any(k in kind for k in ("inverter","battery","junction box","breaker","controller","power supply","transformer","motor housing","casing","housing")):
+        made.append(cube(name,center,(0.95,0.72,0.85),dark,0.10))
+        made.append(cube("Status display",(x,y-0.37,z+0.12),(0.48,0.025,0.22),accents[1],0.018))
+        for n in range(4):
+            made.append(cube("Cooling vent",(x-0.29+n*0.19,y-0.39,z-0.22),(0.11,0.025,0.035),silver,0.008))
+    elif any(k in kind for k in ("pipe","valve","tube","shaft","cable","wire","conduit","hose","busbar","rail","axle")):
+        obj=cyl(name,center,0.13 if "cable" in kind or "wire" in kind else 0.22,1.15,material,32)
+        obj.rotation_euler.y=math.radians(90); made.append(obj)
+        if "valve" in kind:
+            made.append(torus("Valve handwheel",(x,y,z+0.25),0.32,0.055,accent))
+    elif any(k in kind for k in ("bearing","seal","ring","race")):
+        made.append(cyl(name,center,0.48,0.18,dark,64))
+        made.append(torus("Bearing race",(x,y,z+0.12),0.34,0.09,silver))
+        for n in range(8):
+            a=math.tau*n/8
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.075, location=(x+math.cos(a)*0.34,y+math.sin(a)*0.34,z+0.13))
+            ball=bpy.context.object; ball.name="Bearing ball"; ball.data.materials.append(accent); made.append(ball)
+    elif any(k in kind for k in ("water","droplet","fluid","reservoir","tank","pump")):
+        if "droplet" in kind or "water" in kind:
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=20, radius=0.42, location=center)
+            obj=bpy.context.object; obj.name=name; obj.scale=(0.72,0.72,1.15); obj.data.materials.append(glass); made.append(obj)
+        else:
+            made.append(cyl(name,center,0.48,0.85,material,48))
+            made.append(torus("Tank rim",(x,y,z+0.43),0.42,0.045,silver))
+    elif any(k in kind for k in ("heart","lung","brain","organ","cell","blood")):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=24, radius=0.48, location=center)
+        obj=bpy.context.object; obj.name=name; obj.scale=(0.82,0.72,1.12); obj.data.materials.append(accents[2]); made.append(obj)
+        if "lung" in kind:
+            for dx in (-0.24,0.24):
+                bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=16, radius=0.29, location=(x+dx,y,z))
+                lob=bpy.context.object; lob.name="Lung lobe"; lob.data.materials.append(material); made.append(lob)
+    else:
+        # Distinct physical fallback: a labelled machined part, not a repeated mechanism.
+        made.append(cube(name,center,(0.82,0.68,0.42),material,0.07))
+        made.append(cyl("Machined connector",(x,y,z+0.28),0.18,0.18,silver,32))
+    return made
+
 for si,(s,start,end) in enumerate(groups):
     accent=accents[si%3]
-    components=s.get("components") or []
+    components=[str(x)[:34] for x in (s.get("components") or [])[:4]]
     if len(components)<3:
-        components=(components+["Drive assembly","Transfer chamber","Output coupling"])[:3]
-    components=[str(x)[:34] for x in components[:4]]
+        raise RuntimeError("Each scene must name at least three physical components.")
     f0=max(1,int(start*8)+1)
-    f1=max(f0+1,int((start+(end-start)*0.42)*8))
+    f1=max(f0+1,int((start+(end-start)*0.48)*8))
     f2=max(f1+1,int(end*8))
     created=[]
-    # Topic-specific miniature assembly with multiple distinct machined forms.
-    core=cyl("Central mechanism housing",(0,0,0.35),0.88,0.72,dark)
-    core.keyframe_insert("location",frame=f0)
-    core.keyframe_insert("location",frame=f2)
-    created.append(core)
-    ring=torus("Precision retaining ring",(0,0,0.78),0.9,0.075,silver)
-    ring.keyframe_insert("rotation_euler",frame=f0)
-    ring.rotation_euler.z=math.radians(120)
-    ring.keyframe_insert("rotation_euler",frame=f2)
-    created.append(ring)
-    shaft=cyl("Central drive shaft",(0,0,1.05),0.22,1.35,silver,32)
-    shaft.keyframe_insert("rotation_euler",frame=f0)
-    shaft.rotation_euler.z=math.radians(540)
-    shaft.keyframe_insert("rotation_euler",frame=f2)
-    created.append(shaft)
+    # Each beat is built from its own narrated parts; no generic central mechanism is reused.
+    count=len(components)
     for j,label in enumerate(components):
-        angle=(j/max(1,len(components)))*math.tau
-        final=(math.cos(angle)*1.35,math.sin(angle)*1.35,0.28+(j%2)*0.28)
-        exploded=(final[0]*1.85,final[1]*1.85,final[2]+1.1+(j%2)*0.45)
-        kind=(label.lower())
-        if any(k in kind for k in ("gear","rotor","wheel","fan")):
-            obj=cyl("Component · "+label,exploded,0.48,0.22,ivory,48)
-            tooth=torus("Machined gear rim",exploded,0.48,0.07,silver)
-        elif any(k in kind for k in ("pipe","valve","tube","shaft","cable")):
-            obj=cyl("Component · "+label,exploded,0.22,1.05,ivory,32)
-            obj.rotation_euler.y=math.radians(90)
-        else:
-            obj=cube("Component · "+label,exploded,(0.92,0.72,0.34),ivory,0.09)
-        obj.keyframe_insert("location",frame=f0)
-        obj.location=final
-        obj.keyframe_insert("location",frame=f1)
-        obj.rotation_euler.z=angle+math.radians(20)
-        obj.keyframe_insert("rotation_euler",frame=f0)
-        obj.rotation_euler.z=angle
-        obj.keyframe_insert("rotation_euler",frame=f1)
-        created.append(obj)
-        # Accent pin on the component that transfers energy.
-        pin=cyl("Single accent indicator",(final[0],final[1],final[2]+0.24),0.10,0.08,accent,24)
-        pin.keyframe_insert("location",frame=f0)
-        pin.location=(0,0,1.35)
-        pin.keyframe_insert("location",frame=f1)
-        created.append(pin)
-    # Glowing energy bead traverses the mechanism during the explanatory beat.
-    bead_loc=(-2.1,0,1.2)
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=12, radius=0.14, location=bead_loc)
-    bead=bpy.context.object
-    bead.name="Energy transfer particle"
-    bead.data.materials.append(accent)
-    for frame,loc in [(f0,(-2.1,0,1.2)),((f0+f2)//2,(0,0,1.55)),(f2,(2.1,0,1.2))]:
-        bead.location=loc
-        bead.keyframe_insert("location",frame=frame)
-    created.append(bead)
-    # Scene title is kept small and away from the Shorts UI safe-zone.
-    label=text_obj(str(s.get("visual") or components[0]),(-2.7,0,2.6),0.13,ivory,cam.rotation_euler)
+        angle=(j/max(1,count))*math.tau-math.pi/2
+        final=(math.cos(angle)*1.25,math.sin(angle)*1.15,0.22+(j%2)*0.18)
+        exploded=(final[0]*1.55,final[1]*1.55,final[2]+1.25)
+        parts=build_component(label,exploded,ivory,accent)
+        for part in parts:
+            part.keyframe_insert("location",frame=f0)
+            delta=Vector(final)-Vector(exploded)
+            part.location += delta
+            part.keyframe_insert("location",frame=f1)
+            part.keyframe_insert("location",frame=f2)
+            part.rotation_euler.z += math.radians(12 if j%2 else -12)
+            part.keyframe_insert("rotation_euler",frame=f0)
+            part.rotation_euler.z -= math.radians(12 if j%2 else -12)
+            part.keyframe_insert("rotation_euler",frame=f1)
+            created.append(part)
+    # Show a moving signal only when the narration actually describes transfer or flow.
+    story=(str(s.get("visual",""))+" "+str(s.get("voice",""))).lower()
+    if any(k in story for k in ("flow","moves","transfer","travels","current","energy","power","water","light","signal","rotates")):
+        for n in range(5):
+            x=-1.7+n*0.85
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=20, ring_count=12, radius=0.105, location=(x,-0.15,1.35))
+            bead=bpy.context.object; bead.name="Narrated transfer pulse"; bead.data.materials.append(accent)
+            bead.keyframe_insert("location",frame=f0)
+            bead.location=(x+0.45,-0.15,1.35)
+            bead.keyframe_insert("location",frame=f1)
+            created.append(bead)
+    label=text_obj(components[0],(-2.5,0,2.65),0.15,ivory,cam.rotation_euler)
     created.append(label)
-    # Scene objects are visible only during their own beat.
+    # Hide each beat outside its exact timeline interval.
     for obj in created:
         obj.hide_render=True
         obj.keyframe_insert("hide_render",frame=max(1,f0-1))
         obj.hide_render=False
         obj.keyframe_insert("hide_render",frame=f0)
         obj.hide_render=False
-        obj.keyframe_insert("hide_render",frame=f2-1)
+        obj.keyframe_insert("hide_render",frame=max(f0,f2-1))
         obj.hide_render=True
         obj.keyframe_insert("hide_render",frame=min(720,f2+1))
-    # Animate a single camera axis per scene.
     mode=str(s.get("camera") or "slow push-in").lower()
     rig.rotation_euler=(0,0,0)
     rig.keyframe_insert("rotation_euler",frame=f0)
     if "orbit" in mode or "rotate" in mode:
-        rig.rotation_euler.z=math.radians(9)
+        rig.rotation_euler.z=math.radians(8)
         rig.keyframe_insert("rotation_euler",frame=f2)
     else:
         rig.rotation_euler.z=0
         rig.keyframe_insert("rotation_euler",frame=f2)
-        if "push" in mode or "zoom" in mode:
-            cam.data.ortho_scale=11.5
-            cam.data.keyframe_insert("ortho_scale",frame=f0)
-            cam.data.ortho_scale=10.3
-            cam.data.keyframe_insert("ortho_scale",frame=f2)
+        cam.data.ortho_scale=11.5
+        cam.data.keyframe_insert("ortho_scale",frame=f0)
+        cam.data.ortho_scale=10.6
+        cam.data.keyframe_insert("ortho_scale",frame=f2)
     scene.frame_set(f0)
 
 # Report actual rendered-frame progress to the worker's job tracker.
