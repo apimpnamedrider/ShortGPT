@@ -133,6 +133,7 @@ def _scene_prompt(topic, title, scene, index):
         "CAMERA: " + str(scene.get("camera") or "macro push-in") + ". " + str(scene.get("cameraDetail") or "") + " "
         "VISIBLE PHYSICAL COMPONENTS: " + ", ".join(str(x) for x in parts) + ". "
         "Narration being illustrated: " + str(scene.get("voice") or "") + ". "
+        "SOUND DESIGN: " + str(scene.get("sfx") or "Subtle mechanical ambience") + ". "
         "Visual language: precision industrial product CGI, physically plausible construction, "
         "machined metal and realistic material response, fine bevels, screws, grooves, bearings, "
         "layered cutaway detail where relevant, controlled cinematic studio lighting, deep navy/black "
