@@ -149,15 +149,9 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
     audio_path = work_dir / "narration.mp3"
 
     clean_scenes = []
-    cursor = 0.0
     for index, scene in enumerate(scenes):
         if not isinstance(scene, dict):
             continue
-        start, end = _parse_scene_time(
-            scene.get("time"), cursor, 60.0 * (index + 1) / len(scenes)
-        )
-        start = max(cursor, start)
-        end = max(start + 2.0, min(60.0, end))
         voice_line = str(scene.get("voice") or "").strip()
         visual_line = str(scene.get("visual") or "").strip()
         components = scene.get("components") if isinstance(scene.get("components"), list) else []
@@ -168,23 +162,32 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
             )
         if not voice_line or not visual_line:
             raise ValueError(f"Scene {index + 1} is missing narration or visual direction.")
+        words = len(re.findall(r"\\b[\\w’'-]+\\b", voice_line))
+        if words > 22:
+            raise ValueError(
+                f"Scene {index + 1} contains {words} spoken words. Split it into shorter narration-matched shots."
+            )
         clean_scenes.append({
-            "time": f"{start:.2f}-{end:.2f}s",
             "voice": voice_line,
             "visual": visual_line,
             "components": components,
-            "camera": str(scene.get("camera") or "slow push-in"),
+            "camera": str(scene.get("camera") or "macro push-in"),
             "sfx": str(scene.get("sfx") or "").strip(),
+            "_words": max(1, words),
         })
-        cursor = end
 
-    if len(clean_scenes) < 3:
-        raise ValueError("The storyboard does not contain enough complete 3D scenes.")
-    clean_scenes[0]["time"] = "0.00-" + clean_scenes[0]["time"].split("-", 1)[1]
-    for index in range(len(clean_scenes) - 1):
-        next_start = float(clean_scenes[index + 1]["time"].split("-", 1)[0])
-        clean_scenes[index]["time"] = clean_scenes[index]["time"].split("-", 1)[0] + f"-{next_start:.2f}s"
-    clean_scenes[-1]["time"] = clean_scenes[-1]["time"].split("-", 1)[0] + "-60.00s"
+    if not 8 <= len(clean_scenes) <= 10:
+        raise ValueError("Narration-led videos must contain 8 to 10 distinct micro-shots.")
+    # Edge TTS speaks the narration continuously. Allocate each shot's timeline
+    # by its spoken word count so its visual beat tracks the phrase being heard.
+    total_words = sum(scene["_words"] for scene in clean_scenes)
+    elapsed = 0.0
+    for index, scene in enumerate(clean_scenes):
+        start = elapsed
+        end = 60.0 if index == len(clean_scenes) - 1 else elapsed + 60.0 * scene["_words"] / total_words
+        scene["time"] = f"{start:.2f}-{end:.2f}s"
+        del scene["_words"]
+        elapsed = end
 
     narration = " ".join(scene["voice"] for scene in clean_scenes)
     voice = "en-ZA-LukeNeural"
@@ -209,7 +212,7 @@ def _scene_driven_render(topic, language, work_dir, storyboard_json):
         raise RuntimeError("The Fern 3D scene builder is missing from the worker deployment.")
 
     _set_job_stage("Starting CPU-based 3D render", 10)
-    print(f"Starting Blender CPU Cycles 3D render: {len(clean_scenes)} scenes, 8 fps, 450x800.")
+    print(f"Starting Blender CPU Cycles 3D render: {len(clean_scenes)} narration-timed shots, 8 fps, 900x1600.")
     _run([
         blender, "-b", "--threads", "2", "--python", str(blender_script), "--",
         str(storyboard_path), str(silent_path),
